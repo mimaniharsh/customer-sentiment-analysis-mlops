@@ -45,12 +45,6 @@ PROJECT_NAME: harsh-ml-crp-project-name
 ENDPOINT_NAME: harsh-ml-crp-project-name-endpoint
 ```
 
-### GitHub Repository Secrets
-
-```
-AWS_ROLE_ARN: arn:aws:iam::251198450921:role/GitHubActionS3Role
-SAGEMAKER_ROLE_ARN: arn:aws:iam::251198450921:role/SageMakerStudentExecutionRole
-```
 
 ### IAM Roles Required
 
