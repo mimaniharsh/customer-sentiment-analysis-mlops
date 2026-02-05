@@ -4,14 +4,23 @@ on:
   workflow_dispatch:
     inputs:
       epochs:
-        description: 'Number of training epochs'
+        description: 'Number of epochs'
         required: false
         default: '10'
+      batch_size:
+        description: 'Batch size'
+        required: false
+        default: '32'
 
   workflow_run:
     workflows: ["02 - Data Preprocessing"]
-    types:
-      - completed
+    types: [completed]
+
+  push:
+    branches:
+      - master
+    paths:
+      - 'src/model/model_train.py'
 
 permissions:
   id-token: write
@@ -25,152 +34,155 @@ env:
 
 jobs:
   train-model:
+    name: Train Model on SageMaker
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' || github.event_name == 'push' }}
+
+    permissions:
+      id-token: write
+      contents: read
 
     outputs:
       job-name: ${{ steps.start-training.outputs.job_name }}
       model-s3-uri: ${{ steps.get-model.outputs.model_uri }}
 
     steps:
-      # --------------------------------------------------
-      # Checkout repository
-      # --------------------------------------------------
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      # --------------------------------------------------
-      # Generate unique timestamp
-      # --------------------------------------------------
       - name: Generate timestamp
         id: timestamp
-        run: echo "timestamp=$(date +%Y%m%d-%H%M%S)" >> $GITHUB_OUTPUT
+        run: |
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
+          echo "Generated timestamp: $TIMESTAMP"
 
-      # --------------------------------------------------
-      # Python setup
-      # --------------------------------------------------
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install boto3 sagemaker pandas numpy
+        run: pip install boto3 sagemaker pandas
 
-      # --------------------------------------------------
-      # AWS authentication (OIDC)
-      # --------------------------------------------------
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # --------------------------------------------------
-      # Package training code and upload to S3
-      # --------------------------------------------------
-      - name: Upload training code to S3
+      - name: Upload script to S3
         run: |
-          tar -cvzf sourcedir.tar.gz src/model_train.py
-          aws s3 cp sourcedir.tar.gz \
-            s3://${{ env.S3_BUCKET }}/${{ env.PROJECT_NAME }}/code/sourcedir.tar.gz
+          # Create the wrapper to ensure model_train.py runs correctly in SageMaker
+          cat > train.py <<'EOF'
+          import subprocess
+          import sys
+          subprocess.check_call([sys.executable, "model_train.py"] + sys.argv[1:])
+          EOF
 
-      # --------------------------------------------------
-      # Start SageMaker training job (SCRIPT MODE)
-      # --------------------------------------------------
+          cp src/model_train.py .
+          # Ensure requirements are included for transformers/sklearn
+          echo "transformers" > requirements.txt
+          echo "scikit-learn" >> requirements.txt
+          
+          tar -cvzf sourcedir.tar.gz train.py model_train.py requirements.txt
+          aws s3 cp sourcedir.tar.gz s3://${{ env.S3_BUCKET }}/${{ env.PROJECT_NAME }}/code/sourcedir.tar.gz
+
+      - name: Verify processed data
+        run: |
+          echo "Checking for processed data..."
+          FILE_COUNT=$(aws s3 ls s3://${{ env.S3_BUCKET }}/${{ env.PROJECT_NAME }}/data/processed/ --recursive | wc -l)
+          if [ $FILE_COUNT -lt 1 ]; then
+            echo "No processed data found!"
+            exit 1
+          fi
+          echo "Found data files."
+
       - name: Start SageMaker Training Job
         id: start-training
         run: |
           python - <<'EOF'
           import boto3
           import os
-
-          sm = boto3.client("sagemaker", region_name=os.environ["AWS_REGION"])
-
-          job_name = f"{os.environ['PROJECT_NAME']}-train-${{ steps.timestamp.outputs.timestamp }}"
-
-          sm.create_training_job(
+          
+          sagemaker = boto3.client('sagemaker', region_name='${{ env.AWS_REGION }}')
+          
+          job_name = f"${{ env.PROJECT_NAME }}-train-${{ steps.timestamp.outputs.timestamp }}"
+          
+          sagemaker.create_training_job(
               TrainingJobName=job_name,
-              RoleArn=os.environ["SAGEMAKER_ROLE_ARN"],
+              RoleArn='${{ env.SAGEMAKER_ROLE_ARN }}',
               AlgorithmSpecification={
-                  "TrainingImage": f"763104351884.dkr.ecr.{os.environ['AWS_REGION']}.amazonaws.com/pytorch-training:2.0.0-cpu-py310",
-                  "TrainingInputMode": "File"
+                  'TrainingImage': f'763104351884.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/pytorch-training:2.0.0-cpu-py310',
+                  'TrainingInputMode': 'File'
               },
-              InputDataConfig=[
-                  {
-                      "ChannelName": "training",
-                      "DataSource": {
-                          "S3DataSource": {
-                              "S3DataType": "S3Prefix",
-                              "S3Uri": f"s3://{os.environ['S3_BUCKET']}/{os.environ['PROJECT_NAME']}/data/processed/"
-                          }
+              InputDataConfig=[{
+                  'ChannelName': 'training',
+                  'DataSource': {
+                      'S3DataSource': {
+                          'S3DataType': 'S3Prefix',
+                          'S3Uri': 's3://${{ env.S3_BUCKET }}/${{ env.PROJECT_NAME }}/data/processed/'
                       }
                   }
-              ],
+              }],
               OutputDataConfig={
-                  "S3OutputPath": f"s3://{os.environ['S3_BUCKET']}/{os.environ['PROJECT_NAME']}/models/"
+                  'S3OutputPath': 's3://${{ env.S3_BUCKET }}/${{ env.PROJECT_NAME }}/models/'
               },
               ResourceConfig={
-                  "InstanceType": "ml.m5.xlarge",
-                  "InstanceCount": 1,
-                  "VolumeSizeInGB": 10
-              },
-              StoppingCondition={
-                  "MaxRuntimeInSeconds": 3600
+                  'InstanceType': 'ml.m5.xlarge',
+                  'InstanceCount': 1,
+                  'VolumeSizeInGB': 10
               },
               HyperParameters={
-                  "epochs": "${{ github.event.inputs.epochs || '10' }}",
-                  "sagemaker_program": "model_train.py",
-                  "sagemaker_submit_directory":
-                      f"s3://{os.environ['S3_BUCKET']}/{os.environ['PROJECT_NAME']}/code/sourcedir.tar.gz"
-              },
-              Environment={
-                  "S3_BUCKET": os.environ["S3_BUCKET"],
-                  "PROJECT_NAME": os.environ["PROJECT_NAME"],
-                  "AWS_REGION": os.environ["AWS_REGION"]
+                  'bucket': '${{ env.S3_BUCKET }}',
+                  'project': '${{ env.PROJECT_NAME }}',
+                  'region': '${{ env.AWS_REGION }}',
+                  'epochs': '${{ github.event.inputs.epochs || '10' }}',
+                  'batch-size': '${{ github.event.inputs.batch_size || '32' }}',
+                  'sagemaker_program': 'train.py',
+                  'sagemaker_submit_directory': f"s3://${{ env.S3_BUCKET }}/${{ env.PROJECT_NAME }}/code/sourcedir.tar.gz"
               }
           )
-
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+          
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f"job_name={job_name}\n")
           EOF
 
-      # --------------------------------------------------
-      # Wait for training to finish
-      # --------------------------------------------------
-      - name: Wait for Training
+      - name: Wait for Training Job
         run: |
-          aws sagemaker wait training-job-completed-or-stopped \
-            --training-job-name ${{ steps.start-training.outputs.job_name }}
+          python - <<'EOF'
+          import boto3
+          import time
+          import os
 
-          STATUS=$(aws sagemaker describe-training-job \
-            --training-job-name ${{ steps.start-training.outputs.job_name }} \
-            --query 'TrainingJobStatus' --output text)
+          sagemaker = boto3.client('sagemaker', region_name='${{ env.AWS_REGION }}')
+          job_name = "${{ steps.start-training.outputs.job_name }}"
+          
+          print(f"Polling status for: {job_name}")
+          while True:
+              resp = sagemaker.describe_training_job(TrainingJobName=job_name)
+              status = resp['TrainingJobStatus']
+              print(f"Status: {status}")
+              
+              if status in ['Completed', 'Failed', 'Stopped']:
+                  if status != 'Completed':
+                      print(f"Error: {resp.get('FailureReason', 'Unknown')}")
+                      exit(1)
+                  break
+              time.sleep(30)
+          EOF
 
-          if [ "$STATUS" != "Completed" ]; then
-            echo "Training failed with status: $STATUS"
-            exit 1
-          fi
-
-      # --------------------------------------------------
-      # Fetch model artifacts
-      # --------------------------------------------------
       - name: Get model artifacts
         id: get-model
         run: |
           MODEL_URI=$(aws sagemaker describe-training-job \
             --training-job-name ${{ steps.start-training.outputs.job_name }} \
-            --query 'ModelArtifacts.S3ModelArtifacts' \
-            --output text)
-
+            --query 'ModelArtifacts.S3ModelArtifacts' --output text)
           echo "model_uri=$MODEL_URI" >> $GITHUB_OUTPUT
-          echo "Model URI: $MODEL_URI"
 
-      # --------------------------------------------------
-      # Job summary
-      # --------------------------------------------------
-      - name: Training Summary
+      - name: Create Summary
         run: |
-          echo "## SageMaker Training Summary" >> $GITHUB_STEP_SUMMARY
-          echo "- **Job Name:** ${{ steps.start-training.outputs.job_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Model Artifacts:** ${{ steps.get-model.outputs.model_uri }}" >> $GITHUB_STEP_SUMMARY
+          echo "## Model Training Complete ✓" >> $GITHUB_STEP_SUMMARY
+          echo "- **Job Name:** \`${{ steps.start-training.outputs.job_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Artifact Location:** ${{ steps.get-model.outputs.model_uri }}" >> $GITHUB_STEP_SUMMARY
