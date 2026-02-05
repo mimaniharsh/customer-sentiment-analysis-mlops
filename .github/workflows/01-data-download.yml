@@ -35,10 +35,11 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ap-south-1
+          aws-region: us-east-1
       
       - name: Download and upload data to S3
-        env:
-          S3_BUCKET: ${{ vars.S3_BUCKET }}
-          AWS_REGION: ${{ vars.AWS_REGION }}
-        run: python src/data_download.py
+        run: |
+          python src/data_download.py \
+            --bucket ${{ vars.S3_BUCKET }} \
+            --project customer-sentiment-analysis-mlops \
+            --region us-east-1

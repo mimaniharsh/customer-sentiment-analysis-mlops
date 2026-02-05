@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import argparse
 import boto3
 import pandas as pd
 import torch
@@ -22,22 +23,20 @@ class TweetDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.labels)
 
-def evaluate_model():
+def evaluate_model(bucket_name, project_name, aws_region):
     """Evaluate trained model on test set"""
-    
-    bucket_name = os.environ['S3_BUCKET']
-    aws_region = os.environ['AWS_REGION']
     
     s3_client = boto3.client('s3', region_name=aws_region)
     
-    # Download test data
-    print("Downloading test data...")
-    test_obj = s3_client.get_object(Bucket=bucket_name, Key='data/preprocessed/test.csv')
+    # Download test data with project path
+    print("📥 Downloading test data...")
+    test_key = f"{project_name}/data/processed/test.csv"
+    test_obj = s3_client.get_object(Bucket=bucket_name, Key=test_key)
     test = pd.read_csv(test_obj['Body'])
-    print(f"Test set: {len(test)} samples")
+    print(f"✅ Test set: {len(test)} samples")
     
-    # Download model
-    print("Downloading model from S3...")
+    # Download model with project path
+    print("📥 Downloading model from S3...")
     os.makedirs('./model', exist_ok=True)
     
     model_files = ['config.json', 'model.safetensors', 'tokenizer_config.json', 
@@ -45,18 +44,22 @@ def evaluate_model():
     
     for file in model_files:
         try:
-            s3_client.download_file(bucket_name, f'models/distilbert/{file}', f'./model/{file}')
+            s3_key = f"{project_name}/models/distilbert/{file}"
+            s3_client.download_file(bucket_name, s3_key, f'./model/{file}')
+            print(f"   ✅ {file}")
         except Exception as e:
-            print(f"Warning: Could not download {file}: {e}")
+            print(f"   ⚠️  Could not download {file}: {e}")
     
     # Load model and tokenizer
-    print("Loading model...")
+    print("🤖 Loading model...")
     tokenizer = DistilBertTokenizerFast.from_pretrained('./model')
     model = DistilBertForSequenceClassification.from_pretrained('./model')
     model.eval()
+    device = torch.device('cpu')
+    model.to(device)
     
     # Tokenize test data
-    print("Tokenizing test data...")
+    print("🔤 Tokenizing test data...")
     test_encodings = tokenizer(
         test['text'].tolist(),
         truncation=True,
@@ -67,31 +70,33 @@ def evaluate_model():
     test_dataset = TweetDataset(test_encodings, test['label'].tolist())
     
     # Predict
-    print("Making predictions...")
+    print("🔮 Making predictions...")
     predictions = []
     true_labels = test['label'].tolist()
     
     with torch.no_grad():
         for i in range(len(test_dataset)):
             item = test_dataset[i]
-            inputs = {k: v.unsqueeze(0) for k, v in item.items() if k != 'labels'}
+            inputs = {k: v.unsqueeze(0).to(device) for k, v in item.items() if k != 'labels'}
             outputs = model(**inputs)
             pred = outputs.logits.argmax(-1).item()
             predictions.append(pred)
     
     # Calculate metrics
-    print("\n=== Evaluation Results ===")
+    print("\n" + "="*50)
+    print("📊 EVALUATION RESULTS")
+    print("="*50)
     accuracy = accuracy_score(true_labels, predictions)
-    print(f"Accuracy: {accuracy:.4f}")
+    print(f"✅ Accuracy: {accuracy:.4f}")
     
-    print("\nClassification Report:")
+    print("\n📋 Classification Report:")
     print(classification_report(true_labels, predictions, 
                                 target_names=['negative', 'neutral', 'positive']))
     
-    print("\nConfusion Matrix:")
+    print("📊 Confusion Matrix:")
     print(confusion_matrix(true_labels, predictions))
     
-    # Save metrics
+    # Save metrics with project path
     metrics = {
         'accuracy': float(accuracy),
         'classification_report': classification_report(
@@ -102,14 +107,22 @@ def evaluate_model():
     }
     
     metrics_json = json.dumps(metrics, indent=2)
+    metrics_key = f"{project_name}/models/distilbert/metrics.json"
     s3_client.put_object(
         Bucket=bucket_name,
-        Key='models/distilbert/metrics.json',
+        Key=metrics_key,
         Body=metrics_json
     )
-    print("\nMetrics saved to S3")
+    print(f"\n✅ Metrics saved to s3://{bucket_name}/{metrics_key}")
     
     return 0
 
 if __name__ == "__main__":
-    sys.exit(evaluate_model())
+    parser = argparse.ArgumentParser(description='Evaluate trained model')
+    parser.add_argument('--bucket', required=True, help='S3 bucket name')
+    parser.add_argument('--project', required=True, help='Project name/prefix')
+    parser.add_argument('--region', default='us-east-1', help='AWS region')
+    
+    args = parser.parse_args()
+    
+    sys.exit(evaluate_model(args.bucket, args.project, args.region))

@@ -34,13 +34,13 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.SAGEMAKER_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
+          aws-region: us-east-1
       
       - name: Deploy model to SageMaker
-        env:
-          S3_BUCKET: ${{ vars.S3_BUCKET }}
-          AWS_REGION: ${{ vars.AWS_REGION }}
-          SAGEMAKER_ROLE_ARN: ${{ secrets.SAGEMAKER_ROLE_ARN }}
-          ENDPOINT_NAME: ${{ vars.ENDPOINT_NAME }}
-          PROJECT_NAME: ${{ vars.PROJECT_NAME }}
-        run: python src/model_deploy.py
+        run: |
+          python src/model_deploy.py \
+            --bucket ${{ vars.S3_BUCKET }} \
+            --project customer-sentiment-analysis-mlops \
+            --endpoint ${{ vars.ENDPOINT_NAME }} \
+            --role ${{ secrets.SAGEMAKER_ROLE_ARN }} \
+            --region us-east-1

@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import argparse
 import boto3
 import pandas as pd
 import torch
@@ -48,26 +49,30 @@ def compute_metrics(pred):
     acc = accuracy_score(labels, preds)
     return {'accuracy': acc, 'f1': f1, 'precision': precision, 'recall': recall}
 
-def train_model():
-    """Train DistilBERT model on SageMaker"""
+def train_model(bucket_name, project_name, aws_region):
+    """Train DistilBERT model on CPU"""
     
-    bucket_name = os.environ['S3_BUCKET']
-    aws_region = os.environ['AWS_REGION']
+    # Force CPU usage
+    device = torch.device('cpu')
+    print(f"🖥️  Using device: {device}")
     
     s3_client = boto3.client('s3', region_name=aws_region)
     
-    # Download preprocessed data
-    print("Downloading training data...")
-    train_obj = s3_client.get_object(Bucket=bucket_name, Key='data/preprocessed/train.csv')
+    # Download preprocessed data with project path
+    print("📥 Downloading training data...")
+    train_key = f"{project_name}/data/processed/train.csv"
+    val_key = f"{project_name}/data/processed/val.csv"
+    
+    train_obj = s3_client.get_object(Bucket=bucket_name, Key=train_key)
     train = pd.read_csv(train_obj['Body'])
     
-    val_obj = s3_client.get_object(Bucket=bucket_name, Key='data/preprocessed/val.csv')
+    val_obj = s3_client.get_object(Bucket=bucket_name, Key=val_key)
     val = pd.read_csv(val_obj['Body'])
     
-    print(f"Train: {len(train)}, Val: {len(val)}")
+    print(f"✅ Train: {len(train)}, Val: {len(val)}")
     
     # Tokenize
-    print("Tokenizing...")
+    print("🔤 Tokenizing...")
     tokenizer = DistilBertTokenizerFast.from_pretrained('distilbert-base-uncased')
     
     train_encodings = tokenizer(
@@ -95,19 +100,20 @@ def train_model():
         y=train['label'].tolist()
     )
     class_weights = torch.tensor(class_weights, dtype=torch.float)
-    print(f"Class weights: {class_weights}")
+    print(f"⚖️  Class weights: {class_weights}")
     
-    # Load model
-    print("Loading model...")
+    # Load model and move to CPU
+    print("🤖 Loading model...")
     model = DistilBertForSequenceClassification.from_pretrained(
         'distilbert-base-uncased',
         num_labels=3
     )
+    model.to(device)
     
-    # Training arguments
+    # Training arguments optimized for CPU
     training_args = TrainingArguments(
         output_dir='./results',
-        num_train_epochs=10,
+        num_train_epochs=3,
         per_device_train_batch_size=16,
         per_device_eval_batch_size=16,
         warmup_steps=500,
@@ -118,7 +124,9 @@ def train_model():
         save_strategy='epoch',
         load_best_model_at_end=True,
         metric_for_best_model='f1',
-        report_to='none'
+        report_to='none',
+        no_cuda=True,  # Force CPU training
+        use_cpu=True
     )
     
     # Create trainer
@@ -132,24 +140,32 @@ def train_model():
     )
     
     # Train
-    print("Training model...")
+    print("🚀 Training model on CPU...")
     trainer.train()
     
     # Save model
-    print("Saving model...")
+    print("💾 Saving model...")
     model.save_pretrained('./model')
     tokenizer.save_pretrained('./model')
     
-    # Upload to S3
-    print("Uploading model to S3...")
+    # Upload to S3 with project path
+    print("📤 Uploading model to S3...")
     for root, dirs, files in os.walk('./model'):
         for file in files:
             local_path = os.path.join(root, file)
-            s3_path = f"models/distilbert/{file}"
+            s3_path = f"{project_name}/models/distilbert/{file}"
             s3_client.upload_file(local_path, bucket_name, s3_path)
+            print(f"   ✅ {file}")
     
-    print("Training complete!")
+    print("✅ Training complete!")
     return 0
 
 if __name__ == "__main__":
-    sys.exit(train_model())
+    parser = argparse.ArgumentParser(description='Train DistilBERT model')
+    parser.add_argument('--bucket', required=True, help='S3 bucket name')
+    parser.add_argument('--project', required=True, help='Project name/prefix')
+    parser.add_argument('--region', default='us-east-1', help='AWS region')
+    
+    args = parser.parse_args()
+    
+    sys.exit(train_model(args.bucket, args.project, args.region))
