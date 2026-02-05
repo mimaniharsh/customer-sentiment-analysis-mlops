@@ -33,7 +33,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install boto3 pandas numpy scikit-learn torch transformers jq
+          pip install "transformers[torch]" boto3 pandas numpy scikit-learn jq
 
       ###########################################################
       # DEBUG 1 — Show GitHub Context Info
