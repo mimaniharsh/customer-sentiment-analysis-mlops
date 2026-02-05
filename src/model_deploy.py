@@ -195,7 +195,7 @@ if __name__ == "__main__":
     parser.add_argument('--project', required=True, help='Project name/prefix')
     parser.add_argument('--endpoint', required=True, help='SageMaker endpoint name')
     parser.add_argument('--role', required=True, help='SageMaker execution role ARN')
-    parser.add_argument('--region', default='us-east-1', help='AWS region')
+    parser.add_argument('--region', default='ap-south-1', help='AWS region')
     
     args = parser.parse_args()
     

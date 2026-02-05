@@ -157,7 +157,7 @@ Workflows run sequentially - each waits for the previous to complete.
 import boto3
 import json
 
-runtime = boto3.client('sagemaker-runtime', region_name='us-east-1')
+runtime = boto3.client('sagemaker-runtime', region_name='ap-south-1')
 
 response = runtime.invoke_endpoint(
     EndpointName='your-endpoint-name',
@@ -234,7 +234,7 @@ s3://your-bucket/
 ## 🛠️ Troubleshooting
 
 ### Error: "aws-region not supplied"
-Workflows have hardcoded `us-east-1`. Verify the region matches your resources.
+Workflows have hardcoded `ap-south-1`. Verify the region matches your resources.
 
 ### Error: "AssumeRole failed"
 1. Verify OIDC provider exists
@@ -243,7 +243,7 @@ Workflows have hardcoded `us-east-1`. Verify the region matches your resources.
 
 ### Error: "NoSuchBucket"
 ```bash
-aws s3 mb s3://your-bucket --region us-east-1
+aws s3 mb s3://your-bucket --region ap-south-1
 ```
 
 ### Training takes too long

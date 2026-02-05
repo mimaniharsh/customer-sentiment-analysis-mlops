@@ -60,7 +60,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Preprocess data and upload to S3')
     parser.add_argument('--bucket', required=True, help='S3 bucket name')
     parser.add_argument('--project', required=True, help='Project name/prefix')
-    parser.add_argument('--region', default='us-east-1', help='AWS region')
+    parser.add_argument('--region', default='ap-south-1', help='AWS region')
     
     args = parser.parse_args()
     

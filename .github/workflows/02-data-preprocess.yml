@@ -34,11 +34,11 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: us-east-1
+          aws-region: ap-south-1
       
       - name: Preprocess data
         run: |
           python src/data_preprocess.py \
             --bucket ${{ vars.S3_BUCKET }} \
             --project customer-sentiment-analysis-mlops \
-            --region us-east-1
+            --region ap-south-1

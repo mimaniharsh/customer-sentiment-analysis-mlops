@@ -34,11 +34,11 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.SAGEMAKER_ROLE_ARN }}
-          aws-region: us-east-1
+          aws-region: ap-south-1
       
       - name: Evaluate model
         run: |
           python src/model_eval.py \
             --bucket ${{ vars.S3_BUCKET }} \
             --project customer-sentiment-analysis-mlops \
-            --region us-east-1
+            --region ap-south-1
