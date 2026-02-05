@@ -1,7 +1,12 @@
-name: 03 - Model Training
+name: 03 - Model Training (SageMaker)
 
 on:
   workflow_dispatch:
+    inputs:
+      epochs:
+        description: 'Number of epochs'
+        required: false
+        default: '10'
   workflow_run:
     workflows: ["02 - Data Preprocessing"]
     types:
@@ -11,93 +16,121 @@ permissions:
   id-token: write
   contents: read
 
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  S3_BUCKET: ${{ vars.S3_BUCKET }}
+  PROJECT_NAME: ${{ vars.PROJECT_NAME }}
+  SAGEMAKER_ROLE_ARN: ${{ secrets.SAGEMAKER_ROLE_ARN }}
+
 jobs:
   train-model:
     runs-on: ubuntu-latest
-    
-    permissions:
-      id-token: write
-      contents: read
-    
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     
+    outputs:
+      job-name: ${{ steps.start-training.outputs.job_name }}
+      model-s3-uri: ${{ steps.get-model.outputs.model_uri }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
+      - name: Generate timestamp
+        id: timestamp
+        run: echo "timestamp=$(date +%Y%m%d-%H%M%S)" >> $GITHUB_OUTPUT
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      
-      - name: Install dependencies
-        run: |
-          pip install --upgrade pip
-          pip install "transformers[torch]" boto3 pandas numpy scikit-learn jq
 
-      ###########################################################
-      # DEBUG 1 — Show GitHub Context Info
-      ###########################################################
-      - name: Debug GitHub Context
-        run: |
-          echo "Repository: ${{ github.repository }}"
-          echo "Ref: ${{ github.ref }}"
-          echo "Event: ${{ github.event_name }}"
-          echo "Actor: ${{ github.actor }}"
-          echo "Workflow: ${{ github.workflow }}"
+      - name: Install orchestration dependencies
+        run: pip install boto3 sagemaker pandas
 
-      ###########################################################
-      # DEBUG 2 — Print actual role ARN being assumed
-      ###########################################################
-      - name: Debug Role ARN
-        run: |
-          echo "Role to assume: ${{ secrets.SAGEMAKER_ROLE_ARN }}"
-
-      ###########################################################
-      # DEBUG 3 — Dump full OIDC token payload
-      ###########################################################
-      - name: Debug OIDC Token Payload
-        run: |
-          ID_TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r '.value')
-          echo "=== ACTUAL OIDC CLAIMS FROM GITHUB ==="
-          echo $ID_TOKEN | cut -d'.' -f2 | base64 -d -i | jq .
-          echo "======================================"
-
-      ###########################################################
-      #DEBUG 4 — Show sub claim exactly as AWS sees it
-      ###########################################################
-      - name: Show OIDC Claim Details
-        run: |
-          echo "Expected sub:"
-          echo "repo:${{ github.repository }}:ref:${{ github.ref }}"
-
-      ###########################################################
-      # AWS LOGIN STEP (your original)
-      ###########################################################
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      ###########################################################
-      #DEBUG 5 — Verify AWS identity after assume
-      ###########################################################
-      - name: Verify AWS Caller Identity
-        run: aws sts get-caller-identity
+      # Step 6 from reference: Pack and upload the training script
+      - name: Upload training script to S3
+        run: |
+          cat > train_wrapper.py <<'EOF'
+          import subprocess
+          import sys
+          # This ensures your original script runs inside the SageMaker container
+          subprocess.check_call([sys.executable, "model_train.py"] + sys.argv[1:])
+          EOF
+          
+          cp src/model_train.py .
+          tar -cvzf sourcedir.tar.gz train_wrapper.py model_train.py
+          aws s3 cp sourcedir.tar.gz s3://${{ env.S3_BUCKET }}/${{ env.PROJECT_NAME }}/code/sourcedir.tar.gz
 
-      ###########################################################
-      #DEBUG 6 — List bucket access test
-      ###########################################################
-      - name: Test S3 Access
-        run: aws s3 ls || echo "S3 access failed"
+      # Step 8 from reference: Launch SageMaker Job
+      - name: Start SageMaker Training Job
+        id: start-training
+        run: |
+          python - <<'EOF'
+          import boto3
+          import os
+          
+          sagemaker = boto3.client('sagemaker', region_name='${{ env.AWS_REGION }}')
+          job_name = f"${{ env.PROJECT_NAME }}-train-${{ steps.timestamp.outputs.timestamp }}"
+          
+          response = sagemaker.create_training_job(
+              TrainingJobName=job_name,
+              RoleArn='${{ env.SAGEMAKER_ROLE_ARN }}',
+              AlgorithmSpecification={
+                  'TrainingImage': '763104351884.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/pytorch-training:2.0.0-gpu-py310',
+                  'TrainingInputMode': 'File'
+              },
+              InputDataConfig=[{
+                  'ChannelName': 'training',
+                  'DataSource': {
+                      'S3DataSource': {
+                          'S3DataType': 'S3Prefix',
+                          'S3Uri': 's3://${{ env.S3_BUCKET }}/${{ env.PROJECT_NAME }}/data/processed/'
+                      }
+                  }
+              }],
+              OutputDataConfig={'S3OutputPath': 's3://${{ env.S3_BUCKET }}/${{ env.PROJECT_NAME }}/models/'},
+              ResourceConfig={
+                  'InstanceType': 'ml.g4dn.xlarge',
+                  'InstanceCount': 1,
+                  'VolumeSizeInGB': 10
+              },
+              StoppingCondition={'MaxRuntimeInSeconds': 3600},
+              HyperParameters={
+                  'epochs': '${{ github.event.inputs.epochs || '10' }}',
+                  'sagemaker_program': 'train_wrapper.py',
+                  'sagemaker_submit_directory': 's3://${{ env.S3_BUCKET }}/${{ env.PROJECT_NAME }}/code/sourcedir.tar.gz'
+              }
+          )
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"job_name={job_name}\n")
+          EOF
 
-      ###########################################################
-      #YOUR ORIGINAL TRAIN STEP (unchanged)
-      ###########################################################
-      - name: Train model
-        env:
-          S3_BUCKET: ${{ vars.S3_BUCKET }}
-          AWS_REGION: ${{ vars.AWS_REGION }}
-        run: python src/model_train.py
+      # Step 9: Poll for completion
+      - name: Wait for Training
+        run: |
+          aws sagemaker wait training-job-completed-or-stopped --training-job-name ${{ steps.start-training.outputs.job_name }}
+          
+          STATUS=$(aws sagemaker describe-training-job --training-job-name ${{ steps.start-training.outputs.job_name }} --query 'TrainingJobStatus' --output text)
+          if [ "$STATUS" != "Completed" ]; then
+            echo "Training failed with status: $STATUS"
+            exit 1
+          fi
+
+      - name: Get model artifacts
+        id: get-model
+        run: |
+          MODEL_URI=$(aws sagemaker describe-training-job --training-job-name ${{ steps.start-training.outputs.job_name }} --query 'ModelArtifacts.S3ModelArtifacts' --output text)
+          echo "model_uri=$MODEL_URI" >> $GITHUB_OUTPUT
+          echo "Model URI: $MODEL_URI"
+
+      - name: Create Summary
+        run: |
+          echo "## Training Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Job Name:** ${{ steps.start-training.outputs.job_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Artifacts:** ${{ steps.get-model.outputs.model_uri }}" >> $GITHUB_STEP_SUMMARY
