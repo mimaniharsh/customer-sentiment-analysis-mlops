@@ -34,7 +34,20 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install boto3 pandas numpy scikit-learn torch transformers
-      
+          
+      - name: Debug OIDC Token Payload
+        run: |
+          ID_TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r '.value')
+          echo "=== ACTUAL OIDC CLAIMS FROM GITHUB ==="
+          echo $ID_TOKEN | cut -d'.' -f2 | base64 -d | jq .
+          echo "======================================"
+          
+      - name: Show OIDC Claim Details
+        run: |
+          echo "The repo is: ${{ github.repository }}"
+          echo "The sub claim being sent is: repo:${{ github.repository }}:ref:${{ github.ref }}"
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
