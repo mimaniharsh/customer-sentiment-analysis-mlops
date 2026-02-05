@@ -14,6 +14,11 @@ permissions:
 jobs:
   train-model:
     runs-on: ubuntu-latest
+    # Explicitly define permissions at the job level to ensure they carry over during workflow_run
+    permissions:
+      id-token: write
+      contents: read
+    
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     
     steps:
