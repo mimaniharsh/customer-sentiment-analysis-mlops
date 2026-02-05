@@ -9,26 +9,32 @@ import pandas as pd
 import numpy as np
 
 # --------------------------------------------------
-# Argument parsing (ONLY hyperparameters)
+# Argument parsing (UPDATED to accept all workflow arguments)
 # --------------------------------------------------
 parser = argparse.ArgumentParser()
+# Accept the hyperparameters passed from the GitHub Actions workflow
 parser.add_argument("--epochs", type=int, default=10)
+parser.add_argument("--batch-size", type=int, default=32)
+parser.add_argument("--bucket", type=str)
+parser.add_argument("--project", type=str)
+parser.add_argument("--region", type=str)
 args = parser.parse_args()
 
+# --------------------------------------------------
+# Mapping arguments to variables
+# --------------------------------------------------
 EPOCHS = args.epochs
-
-# --------------------------------------------------
-# Environment variables (SageMaker injects these)
-# --------------------------------------------------
-S3_BUCKET = os.environ["S3_BUCKET"]
-PROJECT_NAME = os.environ["PROJECT_NAME"]
-AWS_REGION = os.environ["AWS_REGION"]
+BATCH_SIZE = args.batch_size
+S3_BUCKET = args.bucket
+PROJECT_NAME = args.project
+AWS_REGION = args.region
 
 print("========== TRAINING CONFIG ==========")
 print(f"S3_BUCKET      : {S3_BUCKET}")
 print(f"PROJECT_NAME   : {PROJECT_NAME}")
 print(f"AWS_REGION     : {AWS_REGION}")
 print(f"EPOCHS         : {EPOCHS}")
+print(f"BATCH_SIZE     : {BATCH_SIZE}")
 print("=====================================")
 
 # --------------------------------------------------
