@@ -14,7 +14,7 @@ permissions:
 jobs:
   train-model:
     runs-on: ubuntu-latest
-    # Explicitly define permissions at the job level to ensure they carry over during workflow_run
+    
     permissions:
       id-token: write
       contents: read
@@ -33,27 +33,69 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install boto3 pandas numpy scikit-learn torch transformers
-          
+          pip install boto3 pandas numpy scikit-learn torch transformers jq
+
+      ###########################################################
+      # DEBUG 1 — Show GitHub Context Info
+      ###########################################################
+      - name: Debug GitHub Context
+        run: |
+          echo "Repository: ${{ github.repository }}"
+          echo "Ref: ${{ github.ref }}"
+          echo "Event: ${{ github.event_name }}"
+          echo "Actor: ${{ github.actor }}"
+          echo "Workflow: ${{ github.workflow }}"
+
+      ###########################################################
+      # DEBUG 2 — Print actual role ARN being assumed
+      ###########################################################
+      - name: Debug Role ARN
+        run: |
+          echo "Role to assume: ${{ secrets.SAGEMAKER_ROLE_ARN }}"
+
+      ###########################################################
+      # DEBUG 3 — Dump full OIDC token payload
+      ###########################################################
       - name: Debug OIDC Token Payload
         run: |
           ID_TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
             "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r '.value')
           echo "=== ACTUAL OIDC CLAIMS FROM GITHUB ==="
-          echo $ID_TOKEN | cut -d'.' -f2 | base64 -d | jq .
+          echo $ID_TOKEN | cut -d'.' -f2 | base64 -d -i | jq .
           echo "======================================"
-          
+
+      ###########################################################
+      #DEBUG 4 — Show sub claim exactly as AWS sees it
+      ###########################################################
       - name: Show OIDC Claim Details
         run: |
-          echo "The repo is: ${{ github.repository }}"
-          echo "The sub claim being sent is: repo:${{ github.repository }}:ref:${{ github.ref }}"
+          echo "Expected sub:"
+          echo "repo:${{ github.repository }}:ref:${{ github.ref }}"
 
+      ###########################################################
+      # AWS LOGIN STEP (your original)
+      ###########################################################
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.SAGEMAKER_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-      
+
+      ###########################################################
+      #DEBUG 5 — Verify AWS identity after assume
+      ###########################################################
+      - name: Verify AWS Caller Identity
+        run: aws sts get-caller-identity
+
+      ###########################################################
+      #DEBUG 6 — List bucket access test
+      ###########################################################
+      - name: Test S3 Access
+        run: aws s3 ls || echo "S3 access failed"
+
+      ###########################################################
+      #YOUR ORIGINAL TRAIN STEP (unchanged)
+      ###########################################################
       - name: Train model
         env:
           S3_BUCKET: ${{ vars.S3_BUCKET }}
