@@ -16,6 +16,19 @@ from sklearn.metrics import (
     precision_recall_fscore_support
 )
 
+def find_model_directory(root: Path) -> Path:
+    """
+    Recursively search for a directory containing HuggingFace model weights.
+    """
+    for path in root.rglob("*"):
+        if path.is_dir():
+            if (
+                (path / "pytorch_model.bin").exists()
+                or (path / "model.safetensors").exists()
+            ):
+                return path
+    return None
+
 # Make matplotlib CI-safe
 import matplotlib
 matplotlib.use("Agg")
@@ -133,13 +146,15 @@ def evaluate_model(bucket_name, project_name, aws_region, output_path):
     # -------------------------------
     # Validate model files
     # -------------------------------
-    required_files = ["config.json"]
-    weight_files = ["pytorch_model.bin", "model.safetensors"]
+print("🔎 Searching for model weights recursively...")
+actual_model_dir = find_model_directory(found_model_dir)
 
-    if not any((found_model_dir / wf).exists() for wf in weight_files):
-        raise FileNotFoundError(
-            f"❌ Model weights not found in {found_model_dir}"
-        )
+if actual_model_dir is None:
+    raise FileNotFoundError(
+        f"❌ Could not locate HuggingFace model weights inside {found_model_dir}"
+    )
+
+print(f"✅ Found model weights in: {actual_model_dir}")
 
     for rf in required_files:
         if not (found_model_dir / rf).exists():
@@ -151,8 +166,8 @@ def evaluate_model(bucket_name, project_name, aws_region, output_path):
     # Load model
     # -------------------------------
     print(f"\n🤖 Loading model from: {found_model_dir}")
-    tokenizer = DistilBertTokenizerFast.from_pretrained(found_model_dir)
-    model = DistilBertForSequenceClassification.from_pretrained(found_model_dir)
+    tokenizer = DistilBertTokenizerFast.from_pretrained(actual_model_dir)
+    model = DistilBertForSequenceClassification.from_pretrained(actual_model_dir)
 
     device = torch.device("cpu")
     model.to(device)
