@@ -86,7 +86,8 @@ jobs:
           cp src/model_train.py .
           
           # Ensure dependencies are available inside the SageMaker container
-          echo "transformers" > requirements.txt
+          echo "torch==2.0.1" > requirements.txt
+          echo "transformers==4.44.2" >> requirements.txt
           echo "scikit-learn" >> requirements.txt
           
           tar -cvzf sourcedir.tar.gz train.py model_train.py requirements.txt
