@@ -7,12 +7,17 @@ import pandas as pd
 import torch
 import numpy as np
 from pathlib import Path
-from transformers import DistilBertTokenizerFast, DistilBertForSequenceClassification
+import tarfile
+
+from transformers import (
+    DistilBertTokenizerFast,
+    DistilBertForSequenceClassification
+)
 from sklearn.metrics import (
-    classification_report,
-    confusion_matrix,
     accuracy_score,
-    precision_recall_fscore_support
+    precision_recall_fscore_support,
+    classification_report,
+    confusion_matrix
 )
 
 # Make matplotlib CI-safe
@@ -20,11 +25,10 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
-import tarfile
 
 
 # -------------------------------
-# Dataset wrapper
+# Dataset
 # -------------------------------
 class TweetDataset(torch.utils.data.Dataset):
     def __init__(self, encodings, labels):
@@ -41,135 +45,68 @@ class TweetDataset(torch.utils.data.Dataset):
 
 
 # -------------------------------
-# Utility: find model directory
+# Evaluation logic
 # -------------------------------
-def find_model_directory(root: Path) -> Path | None:
-    """
-    Recursively search for a directory containing HuggingFace model weights.
-    """
-    for path in root.rglob("*"):
-        if path.is_dir():
-            if (
-                (path / "pytorch_model.bin").exists()
-                or (path / "model.safetensors").exists()
-            ):
-                return path
-    return None
-
-
-# -------------------------------
-# Main evaluation logic
-# -------------------------------
-def evaluate_model(bucket_name, project_name, aws_region, output_path):
+def evaluate_model(bucket, project, region, model_uri, output_path):
     print("=" * 70)
     print("📊 MODEL EVALUATION")
     print("=" * 70)
 
-    s3_client = boto3.client("s3", region_name=aws_region)
+    s3 = boto3.client("s3", region_name=region)
 
     # -------------------------------
     # Load test data
     # -------------------------------
     print("📥 Downloading test data...")
-    test_key = f"{project_name}/data/processed/test.csv"
-    test_obj = s3_client.get_object(Bucket=bucket_name, Key=test_key)
-    test_df = pd.read_csv(test_obj["Body"])
+    test_key = f"{project}/data/processed/test.csv"
+    obj = s3.get_object(Bucket=bucket, Key=test_key)
+    test_df = pd.read_csv(obj["Body"])
     print(f"✅ Test set loaded: {len(test_df)} samples")
 
     # -------------------------------
-    # Download model artifacts
+    # Download EXACT model artifact
     # -------------------------------
-    print("\n📥 Downloading model from S3...")
-    model_root = Path("./model")
-    model_root.mkdir(exist_ok=True)
+    print(f"\n📦 Using model artifact:\n{model_uri}")
 
-    found_model_dir = None
+    model_bucket = model_uri.replace("s3://", "").split("/", 1)[0]
+    model_key = model_uri.replace(f"s3://{model_bucket}/", "")
 
-    # ---- Option 1: Direct HuggingFace upload
-    direct_prefix = f"{project_name}/models/distilbert/"
-    print(f"🔍 Checking direct upload: s3://{bucket_name}/{direct_prefix}")
+    s3.download_file(model_bucket, model_key, "model.tar.gz")
 
-    response = s3_client.list_objects_v2(
-        Bucket=bucket_name,
-        Prefix=direct_prefix
-    )
-
-    if "Contents" in response:
-        weight_keys = [
-            obj["Key"] for obj in response["Contents"]
-            if obj["Key"].endswith(("pytorch_model.bin", "model.safetensors"))
-        ]
-
-        if weight_keys:
-            print("✅ Found direct HuggingFace model files")
-            for obj in response["Contents"]:
-                filename = obj["Key"].split("/")[-1]
-                if filename:
-                    s3_client.download_file(
-                        bucket_name,
-                        obj["Key"],
-                        model_root / filename
-                    )
-            found_model_dir = model_root
-
-    # ---- Option 2: SageMaker training output
-    if found_model_dir is None:
-        print("🔍 Checking SageMaker training outputs...")
-        sm_prefix = f"{project_name}/models/"
-        response = s3_client.list_objects_v2(
-            Bucket=bucket_name,
-            Prefix=sm_prefix
-        )
-
-        tar_key = None
-        for obj in response.get("Contents", []):
-            if obj["Key"].endswith("model.tar.gz"):
-                tar_key = obj["Key"]
-                break
-
-        if tar_key is None:
-            raise FileNotFoundError(
-                "❌ No model found in S3 (neither direct upload nor SageMaker output)."
-            )
-
-        print(f"📦 Downloading SageMaker model archive: {tar_key}")
-        s3_client.download_file(bucket_name, tar_key, "model.tar.gz")
-
-        print("📂 Extracting model.tar.gz...")
-        with tarfile.open("model.tar.gz", "r:gz") as tar:
-            tar.extractall(model_root)
-
-        found_model_dir = model_root
+    print("📂 Extracting model.tar.gz...")
+    with tarfile.open("model.tar.gz", "r:gz") as tar:
+        tar.extractall("model")
 
     # -------------------------------
-    # Locate actual HF model directory
+    # Locate HF model directory
     # -------------------------------
-    print("🔎 Searching for model weights recursively...")
-    actual_model_dir = find_model_directory(found_model_dir)
+    model_root = Path("model")
+    hf_dir = None
 
-    if actual_model_dir is None:
-        raise FileNotFoundError(
-            f"❌ Could not locate HuggingFace model weights inside {found_model_dir}"
-        )
+    for p in model_root.rglob("*"):
+        if p.is_dir() and (
+            (p / "pytorch_model.bin").exists()
+            or (p / "model.safetensors").exists()
+        ):
+            hf_dir = p
+            break
 
-    print(f"✅ Found model weights in: {actual_model_dir}")
+    if hf_dir is None:
+        raise FileNotFoundError("❌ HuggingFace model weights not found")
+
+    print(f"✅ Found model weights in: {hf_dir}")
 
     # -------------------------------
     # Load model
     # -------------------------------
-    print(f"\n🤖 Loading model from: {actual_model_dir}")
-
-    tokenizer = DistilBertTokenizerFast.from_pretrained(actual_model_dir)
-    model = DistilBertForSequenceClassification.from_pretrained(actual_model_dir)
-
-    device = torch.device("cpu")
-    model.to(device)
+    print("🤖 Loading model...")
+    tokenizer = DistilBertTokenizerFast.from_pretrained(hf_dir)
+    model = DistilBertForSequenceClassification.from_pretrained(hf_dir)
     model.eval()
 
     # -------------------------------
     # Tokenize test data
     # -------------------------------
-    print("🔤 Tokenizing test data...")
     encodings = tokenizer(
         test_df["text"].tolist(),
         truncation=True,
@@ -182,119 +119,77 @@ def evaluate_model(bucket_name, project_name, aws_region, output_path):
     # -------------------------------
     # Inference
     # -------------------------------
-    print("🔮 Running inference...")
-    predictions = []
-    true_labels = test_df["label"].tolist()
-
+    preds = []
     with torch.no_grad():
         for i in range(len(dataset)):
             item = dataset[i]
-            inputs = {k: v.unsqueeze(0).to(device) for k, v in item.items() if k != "labels"}
+            inputs = {k: v.unsqueeze(0) for k, v in item.items() if k != "labels"}
             outputs = model(**inputs)
-            pred = outputs.logits.argmax(-1).item()
-            predictions.append(pred)
+            preds.append(outputs.logits.argmax(-1).item())
+
+    y_true = test_df["label"].tolist()
 
     # -------------------------------
     # Metrics
     # -------------------------------
-    print("\n" + "=" * 70)
-    print("📊 EVALUATION RESULTS")
-    print("=" * 70)
-
-    accuracy = accuracy_score(true_labels, predictions)
+    acc = accuracy_score(y_true, preds)
     precision, recall, f1, _ = precision_recall_fscore_support(
-        true_labels, predictions, average="weighted"
+        y_true, preds, average="weighted"
     )
 
-    print(f"✅ Accuracy : {accuracy:.4f}")
-    print(f"✅ Precision: {precision:.4f}")
-    print(f"✅ Recall   : {recall:.4f}")
-    print(f"✅ F1-score : {f1:.4f}\n")
+    print("\n📊 RESULTS")
+    print(f"Accuracy : {acc:.4f}")
+    print(f"Precision: {precision:.4f}")
+    print(f"Recall   : {recall:.4f}")
+    print(f"F1-score : {f1:.4f}\n")
 
-    print("📋 Classification Report:")
-    print(
-        classification_report(
-            true_labels,
-            predictions,
-            target_names=["negative", "neutral", "positive"]
-        )
-    )
+    print(classification_report(y_true, preds))
 
-    cm = confusion_matrix(true_labels, predictions)
+    cm = confusion_matrix(y_true, preds)
 
-    # -------------------------------
-    # Save artifacts
-    # -------------------------------
     os.makedirs(output_path, exist_ok=True)
 
-    metrics = {
-        "accuracy": accuracy,
-        "precision": precision,
-        "recall": recall,
-        "f1_score": f1,
-        "confusion_matrix": cm.tolist()
-    }
+    with open(f"{output_path}/metrics.json", "w") as f:
+        json.dump(
+            {
+                "accuracy": acc,
+                "precision": precision,
+                "recall": recall,
+                "f1": f1,
+                "confusion_matrix": cm.tolist()
+            },
+            f,
+            indent=2
+        )
 
-    with open(f"{output_path}/evaluation_results.json", "w") as f:
-        json.dump(metrics, f, indent=2)
-
-    plt.figure(figsize=(8, 6))
-    sns.heatmap(
-        cm,
-        annot=True,
-        fmt="d",
-        cmap="Blues",
-        xticklabels=["negative", "neutral", "positive"],
-        yticklabels=["negative", "neutral", "positive"]
-    )
-    plt.title("Confusion Matrix")
+    plt.figure(figsize=(6, 5))
+    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues")
     plt.xlabel("Predicted")
     plt.ylabel("True")
     plt.tight_layout()
-    plt.savefig(f"{output_path}/confusion_matrix.png", dpi=300)
+    plt.savefig(f"{output_path}/confusion_matrix.png")
     plt.close()
 
-    # -------------------------------
-    # Upload results to S3
-    # -------------------------------
-    s3_client.put_object(
-        Bucket=bucket_name,
-        Key=f"{project_name}/evaluation/evaluation_results.json",
-        Body=json.dumps(metrics, indent=2)
-    )
-
-    s3_client.upload_file(
-        f"{output_path}/confusion_matrix.png",
-        bucket_name,
-        f"{project_name}/evaluation/confusion_matrix.png"
-    )
-
-    print("\n✅ Evaluation complete and artifacts uploaded.")
-    print("=" * 70)
+    print("\n✅ Evaluation complete")
 
 
 # -------------------------------
 # Entry point
 # -------------------------------
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Evaluate trained sentiment model")
+    parser = argparse.ArgumentParser()
     parser.add_argument("--bucket", required=True)
     parser.add_argument("--project", required=True)
-    parser.add_argument("--region", default="ap-south-1")
+    parser.add_argument("--region", required=True)
+    parser.add_argument("--model-uri", required=True)
     parser.add_argument("--output-path", default="/tmp/evaluation")
 
     args = parser.parse_args()
 
-    try:
-        evaluate_model(
-            args.bucket,
-            args.project,
-            args.region,
-            args.output_path
-        )
-        sys.exit(0)
-    except Exception as e:
-        print(f"\n❌ Evaluation failed: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
+    evaluate_model(
+        args.bucket,
+        args.project,
+        args.region,
+        args.model_uri,
+        args.output_path
+    )
