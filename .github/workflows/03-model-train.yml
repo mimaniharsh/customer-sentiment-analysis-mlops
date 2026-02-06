@@ -88,7 +88,9 @@ jobs:
           # Ensure dependencies are available inside the SageMaker container
           echo "torch==2.0.1" > requirements.txt
           echo "transformers==4.44.2" >> requirements.txt
+          echo "accelerate>=0.21.0" >> requirements.txt
           echo "scikit-learn" >> requirements.txt
+
           
           tar -cvzf sourcedir.tar.gz train.py model_train.py requirements.txt
           aws s3 cp sourcedir.tar.gz s3://${{ env.S3_BUCKET }}/${{ env.PROJECT_NAME }}/code/sourcedir.tar.gz
