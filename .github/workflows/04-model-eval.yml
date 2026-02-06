@@ -28,7 +28,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install boto3 pandas numpy scikit-learn torch transformers
+          pip install boto3 pandas numpy scikit-learn torch transformers matplotlib seaborn
       
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -41,4 +41,23 @@ jobs:
           python src/model_eval.py \
             --bucket ${{ vars.S3_BUCKET }} \
             --project customer-sentiment-analysis-mlops \
-            --region ap-south-1
+            --region ap-south-1 \
+            --output-path /tmp/evaluation
+      
+      - name: Download and display results
+        run: |
+          aws s3 cp s3://${{ vars.S3_BUCKET }}/customer-sentiment-analysis-mlops/evaluation/evaluation_results.json ./
+          echo "📊 Evaluation Metrics:"
+          cat evaluation_results.json | python -m json.tool
+      
+      - name: Create summary
+        run: |
+          echo "## ✅ Model Evaluation Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Test Metrics" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`json" >> $GITHUB_STEP_SUMMARY
+          cat evaluation_results.json >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📈 Visualizations" >> $GITHUB_STEP_SUMMARY
+          echo "- Confusion Matrix: s3://${{ vars.S3_BUCKET }}/customer-sentiment-analysis-mlops/evaluation/confusion_matrix.png" >> $GITHUB_STEP_SUMMARY

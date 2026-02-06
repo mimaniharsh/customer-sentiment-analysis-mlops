@@ -43,4 +43,43 @@ jobs:
             --project customer-sentiment-analysis-mlops \
             --endpoint ${{ vars.ENDPOINT_NAME }} \
             --role ${{ secrets.SAGEMAKER_ROLE_ARN }} \
-            --region ap-south-1
+            --region ap-south-1 \
+            --output-file deployment_info.json
+      
+      - name: Test endpoint
+        run: |
+          ENDPOINT_NAME="${{ vars.ENDPOINT_NAME }}"
+          TEST_TEXT="The flight was delayed by 3 hours and the staff was rude!"
+          
+          echo "🧪 Testing endpoint with sample text..."
+          echo "Text: $TEST_TEXT"
+          
+          aws sagemaker-runtime invoke-endpoint \
+            --endpoint-name "$ENDPOINT_NAME" \
+            --content-type application/json \
+            --body "{\"text\": \"$TEST_TEXT\"}" \
+            --region ap-south-1 \
+            response.json
+          
+          echo "📊 Prediction Result:"
+          cat response.json | python -m json.tool
+      
+      - name: Create summary
+        run: |
+          echo "## ✅ Model Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🚀 Endpoint Details" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`json" >> $GITHUB_STEP_SUMMARY
+          cat deployment_info.json >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🧪 Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`json" >> $GITHUB_STEP_SUMMARY
+          cat response.json >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📝 Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. Make predictions using the endpoint" >> $GITHUB_STEP_SUMMARY
+          echo "2. Monitor endpoint metrics in CloudWatch" >> $GITHUB_STEP_SUMMARY
+          echo "3. Set up auto-scaling if needed" >> $GITHUB_STEP_SUMMARY
+          echo "4. **Remember to delete endpoint when done to avoid costs!**" >> $GITHUB_STEP_SUMMARY
