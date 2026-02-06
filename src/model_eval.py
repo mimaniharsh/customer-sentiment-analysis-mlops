@@ -45,6 +45,7 @@ def evaluate_model(bucket_name, project_name, aws_region, output_path):
     print("📥 Downloading model from S3...")
     os.makedirs('./model', exist_ok=True)
     
+    # List of expected DistilBert files
     model_files = ['config.json', 'model.safetensors', 'tokenizer_config.json', 
                    'vocab.txt', 'special_tokens_map.json', 'tokenizer.json']
     
