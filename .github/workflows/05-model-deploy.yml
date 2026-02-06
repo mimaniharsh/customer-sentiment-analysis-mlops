@@ -31,10 +31,10 @@ jobs:
           pip install boto3 sagemaker
       
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v2
         with:
-          role-to-assume: ${{ secrets.SAGEMAKER_ROLE_ARN }}
-          aws-region: ap-south-1
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
       
       - name: Deploy model to SageMaker
         run: |
