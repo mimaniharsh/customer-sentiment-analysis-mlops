@@ -34,19 +34,19 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ap-south-1
+          aws-region: ${{ vars.AWS_REGION }}
       
       - name: Evaluate model
         run: |
           python src/model_eval.py \
             --bucket ${{ vars.S3_BUCKET }} \
-            --project customer-sentiment-analysis-mlops \
-            --region ap-south-1 \
+            --project ${{ vars.PROJECT_NAME }} \
+            --region ${{ vars.AWS_REGION }} \
             --output-path /tmp/evaluation
       
       - name: Download and display results
         run: |
-          aws s3 cp s3://${{ vars.S3_BUCKET }}/customer-sentiment-analysis-mlops/evaluation/evaluation_results.json ./
+          aws s3 cp s3://${{ vars.S3_BUCKET }}/${{ vars.PROJECT_NAME }}/evaluation/evaluation_results.json ./
           echo "📊 Evaluation Metrics:"
           cat evaluation_results.json | python -m json.tool
       
@@ -60,4 +60,4 @@ jobs:
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📈 Visualizations" >> $GITHUB_STEP_SUMMARY
-          echo "- Confusion Matrix: s3://${{ vars.S3_BUCKET }}/customer-sentiment-analysis-mlops/evaluation/confusion_matrix.png" >> $GITHUB_STEP_SUMMARY
+          echo "- Confusion Matrix: s3://${{ vars.S3_BUCKET }}/${{ vars.PROJECT_NAME }}/evaluation/confusion_matrix.png" >> $GITHUB_STEP_SUMMARY

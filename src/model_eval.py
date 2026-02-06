@@ -6,6 +6,7 @@ import boto3
 import pandas as pd
 import torch
 import numpy as np
+import tarfile
 from io import StringIO
 from transformers import DistilBertTokenizerFast, DistilBertForSequenceClassification
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, precision_recall_fscore_support
@@ -25,6 +26,109 @@ class TweetDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.labels)
 
+def find_latest_model_path(s3_client, bucket_name, project_name):
+    """Find the latest trained model in S3 (supports both direct upload and SageMaker training)"""
+    
+    # Check direct upload location first
+    direct_path = f"{project_name}/models/distilbert/"
+    print(f"🔍 Checking direct upload location: s3://{bucket_name}/{direct_path}")
+    
+    try:
+        response = s3_client.list_objects_v2(
+            Bucket=bucket_name,
+            Prefix=direct_path
+        )
+        if 'Contents' in response and len(response['Contents']) > 1:
+            print("   ✅ Found model in direct upload location")
+            return direct_path, None
+    except Exception as e:
+        print(f"   ⚠️  Not found: {e}")
+    
+    # Check SageMaker training job location
+    sagemaker_path = f"{project_name}/models/"
+    print(f"🔍 Checking SageMaker training jobs: s3://{bucket_name}/{sagemaker_path}")
+    
+    try:
+        response = s3_client.list_objects_v2(
+            Bucket=bucket_name,
+            Prefix=sagemaker_path
+        )
+        
+        if 'Contents' in response:
+            # Find model.tar.gz files from training jobs
+            model_files = [
+                obj for obj in response['Contents'] 
+                if obj['Key'].endswith('model.tar.gz') and '/output/' in obj['Key']
+            ]
+            
+            if model_files:
+                # Get the most recent one
+                latest = max(model_files, key=lambda x: x['LastModified'])
+                print(f"   ✅ Found SageMaker training output: {latest['Key']}")
+                return None, latest['Key']
+    except Exception as e:
+        print(f"   ⚠️  Error: {e}")
+    
+    return None, None
+
+def download_model_from_s3(s3_client, bucket_name, project_name):
+    """Download model files from S3 (handles both direct files and tar.gz)"""
+    
+    print("📥 Downloading model from S3...")
+    os.makedirs('./model', exist_ok=True)
+    
+    # Find where the model is stored
+    direct_path, tar_key = find_latest_model_path(s3_client, bucket_name, project_name)
+    
+    if not direct_path and not tar_key:
+        print("\n❌ ERROR: No trained model found in S3!")
+        print(f"Searched in:")
+        print(f"  1. s3://{bucket_name}/{project_name}/models/distilbert/")
+        print(f"  2. s3://{bucket_name}/{project_name}/models/*/output/model.tar.gz")
+        raise FileNotFoundError("No trained model found. Did training workflow complete?")
+    
+    # If it's a tar.gz file (SageMaker output)
+    if tar_key:
+        print(f"📦 Downloading model archive from SageMaker output...")
+        s3_client.download_file(bucket_name, tar_key, 'model.tar.gz')
+        print(f"   ✅ model.tar.gz")
+        
+        print("📂 Extracting model files...")
+        with tarfile.open('model.tar.gz', 'r:gz') as tar:
+            tar.extractall('./model')
+        
+        # List extracted files
+        for file in os.listdir('./model'):
+            print(f"   ✅ {file}")
+        
+        os.remove('model.tar.gz')
+        return True
+    
+    # Otherwise download individual files
+    model_files = ['config.json', 'model.safetensors', 'pytorch_model.bin',
+                   'tokenizer_config.json', 'vocab.txt', 'special_tokens_map.json', 
+                   'tokenizer.json']
+    
+    downloaded_files = []
+    for file in model_files:
+        try:
+            s3_key = f"{direct_path}{file}"
+            s3_client.download_file(bucket_name, s3_key, f'./model/{file}')
+            downloaded_files.append(file)
+            print(f"   ✅ {file}")
+        except Exception as e:
+            if file in ['model.safetensors', 'pytorch_model.bin', 'config.json']:
+                print(f"   ⚠️  Could not download {file}")
+    
+    # Verify critical files
+    has_weights = 'model.safetensors' in downloaded_files or 'pytorch_model.bin' in downloaded_files
+    has_config = 'config.json' in downloaded_files
+    
+    if not has_weights or not has_config:
+        raise FileNotFoundError(f"Missing critical model files. Has weights: {has_weights}, Has config: {has_config}")
+    
+    return True
+
 def evaluate_model(bucket_name, project_name, aws_region, output_path):
     """Evaluate trained model on test set"""
     
@@ -34,74 +138,28 @@ def evaluate_model(bucket_name, project_name, aws_region, output_path):
     
     s3_client = boto3.client('s3', region_name=aws_region)
     
-    # Download test data with project path
-    print("📥 Downloading test data...")
+    # Download test data
+    print("\n📥 Downloading test data...")
     test_key = f"{project_name}/data/processed/test.csv"
     test_obj = s3_client.get_object(Bucket=bucket_name, Key=test_key)
     test = pd.read_csv(test_obj['Body'])
     print(f"✅ Test set: {len(test)} samples")
     
-    # Download model with project path
-    print("📥 Downloading model from S3...")
-    os.makedirs('./model', exist_ok=True)
-    
-    # List of expected DistilBert files
-    model_files = ['config.json', 'model.safetensors', 'pytorch_model.bin',
-                   'tokenizer_config.json', 'vocab.txt', 'special_tokens_map.json', 
-                   'tokenizer.json']
-    
-    downloaded_files = []
-    for file in model_files:
-        try:
-            s3_key = f"{project_name}/models/distilbert/{file}"
-            s3_client.download_file(bucket_name, s3_key, f'./model/{file}')
-            downloaded_files.append(file)
-            print(f"   ✅ {file}")
-        except Exception as e:
-            # Only print warning if it's a critical file
-            if file in ['model.safetensors', 'pytorch_model.bin', 'config.json']:
-                print(f"   ⚠️  Could not download {file}: {e}")
-    
-    # Check if critical files were downloaded
-    has_weights = 'model.safetensors' in downloaded_files or 'pytorch_model.bin' in downloaded_files
-    has_config = 'config.json' in downloaded_files
-    
-    if not has_weights or not has_config:
-        print("\n❌ ERROR: Missing critical model files!")
-        print(f"Looking in: s3://{bucket_name}/{project_name}/models/distilbert/")
-        print(f"Has weights: {has_weights}, Has config: {has_config}")
-        print("\nTrying to list available files in S3...")
-        try:
-            response = s3_client.list_objects_v2(
-                Bucket=bucket_name,
-                Prefix=f"{project_name}/models/distilbert/"
-            )
-            if 'Contents' in response:
-                print("Available files:")
-                for obj in response['Contents']:
-                    print(f"  - {obj['Key']}")
-            else:
-                print("  ❌ No files found in this S3 location!")
-                print(f"\n💡 Check if training workflow (03) completed successfully")
-                print(f"   and uploaded files to: s3://{bucket_name}/{project_name}/models/distilbert/")
-        except Exception as e:
-            print(f"  Could not list S3 files: {e}")
-        
-        raise FileNotFoundError(
-            f"Model files not found in s3://{bucket_name}/{project_name}/models/distilbert/. "
-            "Did the training workflow (03) complete successfully and upload the model?"
-        )
+    # Download model (handles both direct upload and SageMaker)
+    print()
+    download_model_from_s3(s3_client, bucket_name, project_name)
     
     # Load model and tokenizer
-    print("🤖 Loading model...")
+    print("\n🤖 Loading model...")
     tokenizer = DistilBertTokenizerFast.from_pretrained('./model')
     model = DistilBertForSequenceClassification.from_pretrained('./model')
     model.eval()
     device = torch.device('cpu')
     model.to(device)
+    print("✅ Model loaded successfully")
     
     # Tokenize test data
-    print("🔤 Tokenizing test data...")
+    print("\n🔤 Tokenizing test data...")
     test_encodings = tokenizer(
         test['text'].tolist(),
         truncation=True,
@@ -135,10 +193,10 @@ def evaluate_model(bucket_name, project_name, aws_region, output_path):
     accuracy = accuracy_score(true_labels, predictions)
     precision, recall, f1, _ = precision_recall_fscore_support(true_labels, predictions, average='weighted')
     
-    print(f"✅ Accuracy: {accuracy:.4f}")
+    print(f"\n✅ Accuracy:  {accuracy:.4f}")
     print(f"✅ Precision: {precision:.4f}")
-    print(f"✅ Recall: {recall:.4f}")
-    print(f"✅ F1-Score: {f1:.4f}")
+    print(f"✅ Recall:    {recall:.4f}")
+    print(f"✅ F1-Score:  {f1:.4f}")
     
     print("\n📋 Classification Report:")
     print(classification_report(true_labels, predictions, 
@@ -148,7 +206,7 @@ def evaluate_model(bucket_name, project_name, aws_region, output_path):
     print("\n📊 Confusion Matrix:")
     print(cm)
     
-    # Save metrics with project path
+    # Save metrics
     metrics = {
         'accuracy': float(accuracy),
         'precision': float(precision),
@@ -210,7 +268,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Evaluate trained model')
     parser.add_argument('--bucket', required=True, help='S3 bucket name')
     parser.add_argument('--project', required=True, help='Project name/prefix')
-    parser.add_argument('--region', default='ap-south-1', help='AWS region')
+    parser.add_argument('--region', required=True, help='AWS region')
     parser.add_argument('--output-path', default='/tmp/evaluation', help='Local output path')
     
     args = parser.parse_args()
@@ -219,7 +277,7 @@ if __name__ == "__main__":
         evaluate_model(args.bucket, args.project, args.region, args.output_path)
         sys.exit(0)
     except Exception as e:
-        print(f"❌ Evaluation failed: {str(e)}")
+        print(f"\n❌ Evaluation failed: {str(e)}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

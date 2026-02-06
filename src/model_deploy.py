@@ -7,29 +7,94 @@ import tarfile
 import shutil
 from datetime import datetime
 
-def create_sagemaker_model(bucket_name, project_name, sagemaker_role, aws_region):
-    """Create SageMaker model from trained artifacts"""
+def find_latest_model_in_s3(s3_client, bucket_name, project_name):
+    """Find the latest trained model (supports SageMaker training jobs and direct uploads)"""
     
-    print("="*70)
-    print("📦 PREPARING SAGEMAKER MODEL ARTIFACT")
-    print("="*70)
+    print("🔍 Searching for trained model...")
     
-    sagemaker = boto3.client('sagemaker', region_name=aws_region)
-    s3_client = boto3.client('s3', region_name=aws_region)
+    # Check SageMaker training job outputs
+    sagemaker_prefix = f"{project_name}/models/"
     
-    # Download model files
-    print("📥 Downloading model files from S3...")
+    try:
+        response = s3_client.list_objects_v2(
+            Bucket=bucket_name,
+            Prefix=sagemaker_prefix
+        )
+        
+        if 'Contents' in response:
+            # Find model.tar.gz files from training jobs
+            model_files = [
+                obj for obj in response['Contents'] 
+                if obj['Key'].endswith('model.tar.gz') and '/output/' in obj['Key']
+            ]
+            
+            if model_files:
+                # Get the most recent one
+                latest = max(model_files, key=lambda x: x['LastModified'])
+                model_uri = f"s3://{bucket_name}/{latest['Key']}"
+                print(f"✅ Found SageMaker training output: {model_uri}")
+                return model_uri, 'sagemaker'
+    except Exception as e:
+        print(f"⚠️  Error searching SageMaker outputs: {e}")
+    
+    # Check direct upload location
+    direct_prefix = f"{project_name}/models/distilbert/"
+    print(f"🔍 Checking direct upload: s3://{bucket_name}/{direct_prefix}")
+    
+    try:
+        response = s3_client.list_objects_v2(
+            Bucket=bucket_name,
+            Prefix=direct_prefix
+        )
+        
+        if 'Contents' in response and len(response['Contents']) > 1:
+            print(f"✅ Found model files in direct upload location")
+            return f"s3://{bucket_name}/{direct_prefix}", 'direct'
+    except Exception as e:
+        print(f"⚠️  Error: {e}")
+    
+    raise FileNotFoundError(
+        f"No trained model found in s3://{bucket_name}/{project_name}/models/. "
+        "Please run training workflow first."
+    )
+
+def prepare_model_for_deployment(s3_client, bucket_name, project_name, model_uri, source_type):
+    """Download and prepare model for SageMaker deployment"""
+    
+    print("\n📦 Preparing model for deployment...")
+    
+    # Create temp directory
     os.makedirs('./model', exist_ok=True)
     
-    model_files = ['config.json', 'model.safetensors', 'tokenizer_config.json', 
-                   'vocab.txt', 'special_tokens_map.json', 'tokenizer.json']
+    if source_type == 'sagemaker':
+        # Download existing model.tar.gz from training job
+        print(f"📥 Downloading from: {model_uri}")
+        model_key = model_uri.replace(f"s3://{bucket_name}/", "")
+        s3_client.download_file(bucket_name, model_key, 'model.tar.gz')
+        
+        # Extract it
+        print("📂 Extracting model...")
+        with tarfile.open('model.tar.gz', 'r:gz') as tar:
+            tar.extractall('./model')
+        
+        os.remove('model.tar.gz')
+        
+    else:
+        # Download individual files
+        print(f"📥 Downloading model files...")
+        prefix = model_uri.replace(f"s3://{bucket_name}/", "")
+        
+        response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=prefix)
+        for obj in response.get('Contents', []):
+            key = obj['Key']
+            filename = key.replace(prefix, '')
+            if filename:
+                local_path = f'./model/{filename}'
+                s3_client.download_file(bucket_name, key, local_path)
+                print(f"   ✅ {filename}")
     
-    for file in model_files:
-        s3_key = f"{project_name}/models/distilbert/{file}"
-        s3_client.download_file(bucket_name, s3_key, f'./model/{file}')
-        print(f"   ✅ {file}")
-    
-    # Create inference script
+    # Add inference script
+    print("\n📝 Creating inference script...")
     inference_code = '''import json
 import torch
 from transformers import DistilBertTokenizerFast, DistilBertForSequenceClassification
@@ -84,7 +149,7 @@ def output_fn(prediction, accept):
         f.write(inference_code)
     print("   ✅ inference.py")
     
-    # Create requirements for inference
+    # Create requirements
     requirements = '''torch==2.3.1
 transformers==4.44.2
 '''
@@ -92,24 +157,30 @@ transformers==4.44.2
         f.write(requirements)
     print("   ✅ requirements.txt")
     
-    # Create model.tar.gz
-    print("\n🗜️  Creating model.tar.gz...")
-    with tarfile.open('model.tar.gz', 'w:gz') as tar:
+    # Create new model.tar.gz
+    print("\n🗜️  Creating deployment artifact...")
+    with tarfile.open('deploy_model.tar.gz', 'w:gz') as tar:
         tar.add('./model', arcname='.')
     
-    # Upload to S3
-    deploy_key = f"{project_name}/models/distilbert/model.tar.gz"
+    # Upload to deployment location
+    deploy_key = f"{project_name}/models/deploy/model.tar.gz"
     print(f"📤 Uploading to s3://{bucket_name}/{deploy_key}")
-    s3_client.upload_file('model.tar.gz', bucket_name, deploy_key)
+    s3_client.upload_file('deploy_model.tar.gz', bucket_name, deploy_key)
     
-    model_data_url = f"s3://{bucket_name}/{deploy_key}"
+    deploy_uri = f"s3://{bucket_name}/{deploy_key}"
     
-    # Create SageMaker model
-    timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
-    model_name = f"{project_name}-model-{timestamp}"
+    # Cleanup
+    shutil.rmtree('./model')
+    os.remove('deploy_model.tar.gz')
+    
+    return deploy_uri
+
+def create_sagemaker_model(model_name, model_data_url, sagemaker_role, aws_region):
+    """Create SageMaker model"""
     
     print(f"\n🤖 Creating SageMaker model: {model_name}")
     
+    sagemaker = boto3.client('sagemaker', region_name=aws_region)
     image_uri = f'763104351884.dkr.ecr.{aws_region}.amazonaws.com/pytorch-inference:2.3.0-cpu-py311'
     
     try:
@@ -127,25 +198,19 @@ transformers==4.44.2
             },
             ExecutionRoleArn=sagemaker_role
         )
-        print("✅ SageMaker model created successfully")
+        print("✅ Model created successfully")
     except Exception as e:
-        print(f"❌ Error creating model: {e}")
+        print(f"❌ Error: {e}")
         raise
     
-    # Cleanup
-    shutil.rmtree('./model')
-    os.remove('model.tar.gz')
-    
-    return model_name, model_data_url
+    return model_name
 
-def create_endpoint_config(model_name, aws_region):
-    """Create SageMaker endpoint configuration"""
+def create_endpoint_config(config_name, model_name, aws_region):
+    """Create endpoint configuration"""
     
-    print("\n⚙️  Creating endpoint configuration...")
+    print(f"\n⚙️  Creating endpoint config: {config_name}")
     
     sagemaker = boto3.client('sagemaker', region_name=aws_region)
-    timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
-    config_name = f"sentiment-config-{timestamp}"
     
     try:
         sagemaker.create_endpoint_config(
@@ -158,24 +223,23 @@ def create_endpoint_config(model_name, aws_region):
                 'InitialVariantWeight': 1.0
             }]
         )
-        print(f"✅ Endpoint config created: {config_name}")
+        print("✅ Config created successfully")
     except Exception as e:
-        print(f"❌ Error creating endpoint config: {e}")
+        print(f"❌ Error: {e}")
         raise
     
     return config_name
 
-def create_or_update_endpoint(config_name, endpoint_name, aws_region):
-    """Create or update SageMaker endpoint"""
+def create_or_update_endpoint(endpoint_name, config_name, aws_region):
+    """Create or update endpoint"""
     
     print(f"\n🚀 Deploying endpoint: {endpoint_name}")
     
     sagemaker = boto3.client('sagemaker', region_name=aws_region)
     
     try:
-        # Check if endpoint exists
         sagemaker.describe_endpoint(EndpointName=endpoint_name)
-        print("⚠️  Endpoint exists, updating...")
+        print("⚠️  Updating existing endpoint...")
         sagemaker.update_endpoint(
             EndpointName=endpoint_name,
             EndpointConfigName=config_name
@@ -192,67 +256,68 @@ def create_or_update_endpoint(config_name, endpoint_name, aws_region):
 def wait_for_endpoint(endpoint_name, aws_region):
     """Wait for endpoint to be InService"""
     
-    print(f"\n⏳ Waiting for endpoint {endpoint_name} to be InService...")
+    print(f"\n⏳ Waiting for endpoint to be ready...")
     
     sagemaker = boto3.client('sagemaker', region_name=aws_region)
     
     import time
-    max_wait_time = 600  # 10 minutes
-    elapsed_time = 0
+    max_wait = 600
+    elapsed = 0
     
-    while elapsed_time < max_wait_time:
+    while elapsed < max_wait:
         try:
             response = sagemaker.describe_endpoint(EndpointName=endpoint_name)
             status = response['EndpointStatus']
             
-            print(f"   Status: {status} ({elapsed_time}s elapsed)")
+            print(f"   Status: {status} ({elapsed}s)")
             
             if status == 'InService':
                 print("✅ Endpoint is ready!")
                 return True
             elif status in ['Failed', 'RollingBack']:
-                failure_reason = response.get('FailureReason', 'Unknown')
-                raise Exception(f"Endpoint creation failed: {failure_reason}")
+                reason = response.get('FailureReason', 'Unknown')
+                raise Exception(f"Endpoint failed: {reason}")
             
             time.sleep(30)
-            elapsed_time += 30
-        except Exception as e:
-            if 'Could not find endpoint' in str(e):
-                print(f"   Endpoint not yet created, waiting...")
-                time.sleep(30)
-                elapsed_time += 30
-            else:
-                raise
+            elapsed += 30
+        except sagemaker.exceptions.ClientError:
+            time.sleep(30)
+            elapsed += 30
     
-    raise Exception(f"Endpoint creation timed out after {max_wait_time}s")
+    raise Exception(f"Timeout after {max_wait}s")
 
 def deploy_model(bucket_name, project_name, endpoint_name, sagemaker_role, aws_region, output_file):
-    """Deploy model to SageMaker endpoint"""
+    """Main deployment function"""
     
     print("="*70)
     print("🚀 MODEL DEPLOYMENT")
     print("="*70)
     
-    # Create model
-    model_name, model_uri = create_sagemaker_model(
-        bucket_name, project_name, sagemaker_role, aws_region
-    )
+    s3_client = boto3.client('s3', region_name=aws_region)
     
-    # Create endpoint config
-    config_name = create_endpoint_config(model_name, aws_region)
+    # Find the model
+    model_uri, source_type = find_latest_model_in_s3(s3_client, bucket_name, project_name)
     
-    # Create/update endpoint
-    endpoint_name = create_or_update_endpoint(config_name, endpoint_name, aws_region)
+    # Prepare for deployment
+    deploy_uri = prepare_model_for_deployment(s3_client, bucket_name, project_name, model_uri, source_type)
     
-    # Wait for endpoint
+    # Create resources
+    timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+    model_name = f"{project_name}-model-{timestamp}"
+    config_name = f"{project_name}-config-{timestamp}"
+    
+    create_sagemaker_model(model_name, deploy_uri, sagemaker_role, aws_region)
+    create_endpoint_config(config_name, model_name, aws_region)
+    create_or_update_endpoint(endpoint_name, config_name, aws_region)
     wait_for_endpoint(endpoint_name, aws_region)
     
-    # Save deployment info
+    # Save info
     deployment_info = {
         'model_name': model_name,
         'config_name': config_name,
         'endpoint_name': endpoint_name,
-        'model_uri': model_uri,
+        'model_uri': deploy_uri,
+        'source_model': model_uri,
         'timestamp': datetime.now().isoformat(),
         'region': aws_region
     }
@@ -265,19 +330,18 @@ def deploy_model(bucket_name, project_name, endpoint_name, sagemaker_role, aws_r
     print("="*70)
     print(f"📍 Endpoint: {endpoint_name}")
     print(f"🌍 Region: {aws_region}")
-    print(f"💾 Deployment info saved to: {output_file}")
     print("="*70)
     
     return deployment_info
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Deploy model to SageMaker')
+    parser = argparse.ArgumentParser()
     parser.add_argument('--bucket', required=True, help='S3 bucket name')
     parser.add_argument('--project', required=True, help='Project name/prefix')
-    parser.add_argument('--endpoint', required=True, help='SageMaker endpoint name')
-    parser.add_argument('--role', required=True, help='SageMaker execution role ARN')
-    parser.add_argument('--region', default='ap-south-1', help='AWS region')
-    parser.add_argument('--output-file', default='deployment_info.json', help='Output file for deployment info')
+    parser.add_argument('--endpoint', required=True, help='Endpoint name')
+    parser.add_argument('--role', required=True, help='SageMaker role ARN')
+    parser.add_argument('--region', required=True, help='AWS region')
+    parser.add_argument('--output-file', default='deployment_info.json', help='Output file')
     
     args = parser.parse_args()
     
@@ -292,7 +356,7 @@ if __name__ == '__main__':
         )
         sys.exit(0)
     except Exception as e:
-        print(f"❌ Deployment failed: {str(e)}")
+        print(f"\n❌ Deployment failed: {str(e)}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

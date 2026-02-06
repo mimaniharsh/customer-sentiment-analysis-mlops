@@ -34,21 +34,22 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.SAGEMAKER_ROLE_ARN }}
-          aws-region: ap-south-1
+          aws-region: ${{ vars.AWS_REGION }}
       
       - name: Deploy model to SageMaker
         run: |
           python src/model_deploy.py \
             --bucket ${{ vars.S3_BUCKET }} \
-            --project customer-sentiment-analysis-mlops \
+            --project ${{ vars.PROJECT_NAME }} \
             --endpoint ${{ vars.ENDPOINT_NAME }} \
             --role ${{ secrets.SAGEMAKER_ROLE_ARN }} \
-            --region ap-south-1 \
+            --region ${{ vars.AWS_REGION }} \
             --output-file deployment_info.json
       
       - name: Test endpoint
         run: |
           ENDPOINT_NAME="${{ vars.ENDPOINT_NAME }}"
+          REGION="${{ vars.AWS_REGION }}"
           TEST_TEXT="The flight was delayed by 3 hours and the staff was rude!"
           
           echo "🧪 Testing endpoint with sample text..."
@@ -58,7 +59,7 @@ jobs:
             --endpoint-name "$ENDPOINT_NAME" \
             --content-type application/json \
             --body "{\"text\": \"$TEST_TEXT\"}" \
-            --region ap-south-1 \
+            --region "$REGION" \
             response.json
           
           echo "📊 Prediction Result:"
