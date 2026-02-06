@@ -46,16 +46,51 @@ def evaluate_model(bucket_name, project_name, aws_region, output_path):
     os.makedirs('./model', exist_ok=True)
     
     # List of expected DistilBert files
-    model_files = ['config.json', 'model.safetensors', 'tokenizer_config.json', 
-                   'vocab.txt', 'special_tokens_map.json', 'tokenizer.json']
+    model_files = ['config.json', 'model.safetensors', 'pytorch_model.bin',
+                   'tokenizer_config.json', 'vocab.txt', 'special_tokens_map.json', 
+                   'tokenizer.json']
     
+    downloaded_files = []
     for file in model_files:
         try:
             s3_key = f"{project_name}/models/distilbert/{file}"
             s3_client.download_file(bucket_name, s3_key, f'./model/{file}')
+            downloaded_files.append(file)
             print(f"   ✅ {file}")
         except Exception as e:
-            print(f"   ⚠️  Could not download {file}: {e}")
+            # Only print warning if it's a critical file
+            if file in ['model.safetensors', 'pytorch_model.bin', 'config.json']:
+                print(f"   ⚠️  Could not download {file}: {e}")
+    
+    # Check if critical files were downloaded
+    has_weights = 'model.safetensors' in downloaded_files or 'pytorch_model.bin' in downloaded_files
+    has_config = 'config.json' in downloaded_files
+    
+    if not has_weights or not has_config:
+        print("\n❌ ERROR: Missing critical model files!")
+        print(f"Looking in: s3://{bucket_name}/{project_name}/models/distilbert/")
+        print(f"Has weights: {has_weights}, Has config: {has_config}")
+        print("\nTrying to list available files in S3...")
+        try:
+            response = s3_client.list_objects_v2(
+                Bucket=bucket_name,
+                Prefix=f"{project_name}/models/distilbert/"
+            )
+            if 'Contents' in response:
+                print("Available files:")
+                for obj in response['Contents']:
+                    print(f"  - {obj['Key']}")
+            else:
+                print("  ❌ No files found in this S3 location!")
+                print(f"\n💡 Check if training workflow (03) completed successfully")
+                print(f"   and uploaded files to: s3://{bucket_name}/{project_name}/models/distilbert/")
+        except Exception as e:
+            print(f"  Could not list S3 files: {e}")
+        
+        raise FileNotFoundError(
+            f"Model files not found in s3://{bucket_name}/{project_name}/models/distilbert/. "
+            "Did the training workflow (03) complete successfully and upload the model?"
+        )
     
     # Load model and tokenizer
     print("🤖 Loading model...")

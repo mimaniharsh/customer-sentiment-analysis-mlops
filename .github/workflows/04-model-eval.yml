@@ -33,21 +33,20 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ secrets.SAGEMAKER_ROLE_ARN }}
+          aws-region: ap-south-1
       
       - name: Evaluate model
         run: |
-          # Use vars and env to ensure the script gets the right paths
           python src/model_eval.py \
             --bucket ${{ vars.S3_BUCKET }} \
-            --project ${{ vars.PROJECT_NAME }} \
-            --region ${{ vars.AWS_REGION }} \
+            --project customer-sentiment-analysis-mlops \
+            --region ap-south-1 \
             --output-path /tmp/evaluation
       
       - name: Download and display results
         run: |
-          aws s3 cp s3://${{ vars.S3_BUCKET }}/${{ vars.PROJECT_NAME }}/evaluation/evaluation_results.json ./
+          aws s3 cp s3://${{ vars.S3_BUCKET }}/customer-sentiment-analysis-mlops/evaluation/evaluation_results.json ./
           echo "📊 Evaluation Metrics:"
           cat evaluation_results.json | python -m json.tool
       
