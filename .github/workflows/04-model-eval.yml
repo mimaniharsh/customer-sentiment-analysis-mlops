@@ -1,6 +1,14 @@
 name: 04 - Model Evaluation
 
 on:
+  # Manual trigger (you WILL see "Run workflow")
+  workflow_dispatch:
+    inputs:
+      model_s3_uri:
+        description: "Exact S3 URI of model.tar.gz"
+        required: true
+
+  # Auto-trigger after training
   workflow_run:
     workflows: ["03 - Model Training (SageMaker)"]
     types: [completed]
@@ -14,7 +22,7 @@ jobs:
   evaluate:
     runs-on: ubuntu-latest
 
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
 
     permissions:
       id-token: write
@@ -45,5 +53,5 @@ jobs:
             --bucket ${{ env.S3_BUCKET }} \
             --project ${{ env.PROJECT_NAME }} \
             --region ${{ env.AWS_REGION }} \
-            --model-uri ${{ github.event.workflow_run.outputs.model-s3-uri }} \
+            --model-uri ${{ github.event.inputs.model_s3_uri || github.event.workflow_run.outputs.model-s3-uri }} \
             --output-path /tmp/evaluation

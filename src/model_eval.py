@@ -1,14 +1,12 @@
 import os
-import sys
 import json
 import argparse
 import boto3
+import tarfile
+from pathlib import Path
+
 import pandas as pd
 import torch
-import numpy as np
-from pathlib import Path
-import tarfile
-
 from transformers import (
     DistilBertTokenizerFast,
     DistilBertForSequenceClassification
@@ -64,7 +62,7 @@ def evaluate_model(bucket, project, region, model_uri, output_path):
     print(f"✅ Test set loaded: {len(test_df)} samples")
 
     # -------------------------------
-    # Download EXACT model artifact
+    # Download exact model artifact
     # -------------------------------
     print(f"\n📦 Using model artifact:\n{model_uri}")
 
@@ -78,7 +76,7 @@ def evaluate_model(bucket, project, region, model_uri, output_path):
         tar.extractall("model")
 
     # -------------------------------
-    # Locate HF model directory
+    # Locate HuggingFace model dir
     # -------------------------------
     model_root = Path("model")
     hf_dir = None
@@ -142,25 +140,22 @@ def evaluate_model(bucket, project, region, model_uri, output_path):
     print(f"Precision: {precision:.4f}")
     print(f"Recall   : {recall:.4f}")
     print(f"F1-score : {f1:.4f}\n")
-
     print(classification_report(y_true, preds))
 
     cm = confusion_matrix(y_true, preds)
 
     os.makedirs(output_path, exist_ok=True)
 
+    metrics = {
+        "accuracy": acc,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "confusion_matrix": cm.tolist()
+    }
+
     with open(f"{output_path}/metrics.json", "w") as f:
-        json.dump(
-            {
-                "accuracy": acc,
-                "precision": precision,
-                "recall": recall,
-                "f1": f1,
-                "confusion_matrix": cm.tolist()
-            },
-            f,
-            indent=2
-        )
+        json.dump(metrics, f, indent=2)
 
     plt.figure(figsize=(6, 5))
     sns.heatmap(cm, annot=True, fmt="d", cmap="Blues")
@@ -170,7 +165,22 @@ def evaluate_model(bucket, project, region, model_uri, output_path):
     plt.savefig(f"{output_path}/confusion_matrix.png")
     plt.close()
 
-    print("\n✅ Evaluation complete")
+    # -------------------------------
+    # Upload results to S3
+    # -------------------------------
+    s3.put_object(
+        Bucket=bucket,
+        Key=f"{project}/evaluation/metrics.json",
+        Body=json.dumps(metrics, indent=2)
+    )
+
+    s3.upload_file(
+        f"{output_path}/confusion_matrix.png",
+        bucket,
+        f"{project}/evaluation/confusion_matrix.png"
+    )
+
+    print("\n✅ Evaluation complete and results uploaded")
 
 
 # -------------------------------
