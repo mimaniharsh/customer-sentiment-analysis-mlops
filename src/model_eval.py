@@ -156,11 +156,6 @@ if actual_model_dir is None:
 
 print(f"✅ Found model weights in: {actual_model_dir}")
 
-    for rf in required_files:
-        if not (found_model_dir / rf).exists():
-            raise FileNotFoundError(
-                f"❌ Required file missing: {rf} in {found_model_dir}"
-            )
 
     # -------------------------------
     # Load model
