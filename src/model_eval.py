@@ -7,7 +7,6 @@ import pandas as pd
 import torch
 import numpy as np
 from pathlib import Path
-from io import StringIO
 from transformers import DistilBertTokenizerFast, DistilBertForSequenceClassification
 from sklearn.metrics import (
     classification_report,
@@ -15,19 +14,6 @@ from sklearn.metrics import (
     accuracy_score,
     precision_recall_fscore_support
 )
-
-def find_model_directory(root: Path) -> Path:
-    """
-    Recursively search for a directory containing HuggingFace model weights.
-    """
-    for path in root.rglob("*"):
-        if path.is_dir():
-            if (
-                (path / "pytorch_model.bin").exists()
-                or (path / "model.safetensors").exists()
-            ):
-                return path
-    return None
 
 # Make matplotlib CI-safe
 import matplotlib
@@ -55,7 +41,24 @@ class TweetDataset(torch.utils.data.Dataset):
 
 
 # -------------------------------
-# Main evaluation function
+# Utility: find model directory
+# -------------------------------
+def find_model_directory(root: Path) -> Path | None:
+    """
+    Recursively search for a directory containing HuggingFace model weights.
+    """
+    for path in root.rglob("*"):
+        if path.is_dir():
+            if (
+                (path / "pytorch_model.bin").exists()
+                or (path / "model.safetensors").exists()
+            ):
+                return path
+    return None
+
+
+# -------------------------------
+# Main evaluation logic
 # -------------------------------
 def evaluate_model(bucket_name, project_name, aws_region, output_path):
     print("=" * 70)
@@ -71,11 +74,10 @@ def evaluate_model(bucket_name, project_name, aws_region, output_path):
     test_key = f"{project_name}/data/processed/test.csv"
     test_obj = s3_client.get_object(Bucket=bucket_name, Key=test_key)
     test_df = pd.read_csv(test_obj["Body"])
-
     print(f"✅ Test set loaded: {len(test_df)} samples")
 
     # -------------------------------
-    # Download model (robust logic)
+    # Download model artifacts
     # -------------------------------
     print("\n📥 Downloading model from S3...")
     model_root = Path("./model")
@@ -83,7 +85,7 @@ def evaluate_model(bucket_name, project_name, aws_region, output_path):
 
     found_model_dir = None
 
-    # ---- Option 1: Direct HuggingFace-style upload
+    # ---- Option 1: Direct HuggingFace upload
     direct_prefix = f"{project_name}/models/distilbert/"
     print(f"🔍 Checking direct upload: s3://{bucket_name}/{direct_prefix}")
 
@@ -127,7 +129,7 @@ def evaluate_model(bucket_name, project_name, aws_region, output_path):
 
         if tar_key is None:
             raise FileNotFoundError(
-                "❌ No valid model found (neither direct upload nor SageMaker output)."
+                "❌ No model found in S3 (neither direct upload nor SageMaker output)."
             )
 
         print(f"📦 Downloading SageMaker model archive: {tar_key}")
@@ -137,30 +139,26 @@ def evaluate_model(bucket_name, project_name, aws_region, output_path):
         with tarfile.open("model.tar.gz", "r:gz") as tar:
             tar.extractall(model_root)
 
-        # SageMaker usually nests model files inside ./model/model/
-        if (model_root / "model").exists():
-            found_model_dir = model_root / "model"
-        else:
-            found_model_dir = model_root
+        found_model_dir = model_root
 
     # -------------------------------
-    # Validate model files
+    # Locate actual HF model directory
     # -------------------------------
-print("🔎 Searching for model weights recursively...")
-actual_model_dir = find_model_directory(found_model_dir)
+    print("🔎 Searching for model weights recursively...")
+    actual_model_dir = find_model_directory(found_model_dir)
 
-if actual_model_dir is None:
-    raise FileNotFoundError(
-        f"❌ Could not locate HuggingFace model weights inside {found_model_dir}"
-    )
+    if actual_model_dir is None:
+        raise FileNotFoundError(
+            f"❌ Could not locate HuggingFace model weights inside {found_model_dir}"
+        )
 
-print(f"✅ Found model weights in: {actual_model_dir}")
-
+    print(f"✅ Found model weights in: {actual_model_dir}")
 
     # -------------------------------
     # Load model
     # -------------------------------
-    print(f"\n🤖 Loading model from: {found_model_dir}")
+    print(f"\n🤖 Loading model from: {actual_model_dir}")
+
     tokenizer = DistilBertTokenizerFast.from_pretrained(actual_model_dir)
     model = DistilBertForSequenceClassification.from_pretrained(actual_model_dir)
 
@@ -190,8 +188,8 @@ print(f"✅ Found model weights in: {actual_model_dir}")
 
     with torch.no_grad():
         for i in range(len(dataset)):
-            batch = dataset[i]
-            inputs = {k: v.unsqueeze(0).to(device) for k, v in batch.items() if k != "labels"}
+            item = dataset[i]
+            inputs = {k: v.unsqueeze(0).to(device) for k, v in item.items() if k != "labels"}
             outputs = model(**inputs)
             pred = outputs.logits.argmax(-1).item()
             predictions.append(pred)
@@ -214,10 +212,13 @@ print(f"✅ Found model weights in: {actual_model_dir}")
     print(f"✅ F1-score : {f1:.4f}\n")
 
     print("📋 Classification Report:")
-    print(classification_report(
-        true_labels, predictions,
-        target_names=["negative", "neutral", "positive"]
-    ))
+    print(
+        classification_report(
+            true_labels,
+            predictions,
+            target_names=["negative", "neutral", "positive"]
+        )
+    )
 
     cm = confusion_matrix(true_labels, predictions)
 
