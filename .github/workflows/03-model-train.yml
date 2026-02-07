@@ -148,8 +148,9 @@ jobs:
                   'bucket': '${{ env.S3_BUCKET }}',
                   'project': '${{ env.PROJECT_NAME }}',
                   'region': '${{ env.AWS_REGION }}',
-                  'epochs': '${{ github.event.inputs.epochs || '10' }}',
-                  'batch-size': '${{ github.event.inputs.batch_size || '32' }}',
+                  'epochs': '2',          # ⬅️ reduced
+                  'batch-size': '16',     # ⬅️ reduced
+
                   'sagemaker_program': 'train.py',
                   'sagemaker_submit_directory': f"s3://${{ env.S3_BUCKET }}/${{ env.PROJECT_NAME }}/code/sourcedir.tar.gz"
               }

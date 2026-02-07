@@ -106,11 +106,13 @@ training_args = TrainingArguments(
     output_dir="/tmp/checkpoints",
     num_train_epochs=EPOCHS,
     per_device_train_batch_size=BATCH_SIZE,
+    max_steps=500,                 # ⬅️ HARD STOP to avoid 1h timeout
     logging_steps=50,
     save_strategy="no",
     evaluation_strategy="no",
     report_to="none"
 )
+
 
 # -------------------------------
 # Trainer
