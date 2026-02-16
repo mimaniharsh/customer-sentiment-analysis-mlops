@@ -14,13 +14,11 @@ from datetime import datetime
 
 def find_latest_model(s3_client, bucket_name, project_name):
     """Find latest trained model in S3"""
-    
     print("🔍 Searching for trained model...")
     prefix = f"{project_name}/models/"
     
     try:
         response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=prefix)
-        
         if 'Contents' in response:
             model_files = [
                 obj for obj in response['Contents'] 
@@ -37,13 +35,12 @@ def find_latest_model(s3_client, bucket_name, project_name):
         print(f"❌ Error: {e}")
     
     raise FileNotFoundError(
-        f"No trained model found in s3://{bucket_name}/{project_name}/models/. "
+        f"No trained model found in s3://{bucket_name}/{project_name}/models/.\n"
         "Please run training workflow first."
     )
 
 def prepare_model_for_deployment(s3_client, bucket_name, project_name, model_uri):
     """Download, add inference script, and repackage model"""
-    
     print("\n📦 Preparing model for deployment...")
     
     # Download model
@@ -110,13 +107,13 @@ def output_fn(prediction, accept):
         return json.dumps(prediction), accept
     raise ValueError(f"Unsupported accept type: {accept}")
 '''
-    
     with open('./model/inference.py', 'w') as f:
         f.write(inference_code)
     print("   ✅ inference.py")
     
-    # Add requirements
-    requirements = 'torch==2.3.1\ntransformers==4.44.2\n'
+    # Add requirements (UPDATED: Removed torch to prevent massive cold start download)
+    print("📝 Creating requirements.txt...")
+    requirements = 'transformers==4.44.2\n'
     with open('./model/requirements.txt', 'w') as f:
         f.write(requirements)
     print("   ✅ requirements.txt")
@@ -141,9 +138,7 @@ def output_fn(prediction, accept):
 
 def create_sagemaker_model(model_name, model_data_url, sagemaker_role, aws_region):
     """Create SageMaker model"""
-    
     print(f"\n🤖 Creating SageMaker model: {model_name}")
-    
     sagemaker = boto3.client('sagemaker', region_name=aws_region)
     image_uri = f'763104351884.dkr.ecr.{aws_region}.amazonaws.com/pytorch-inference:2.3.0-cpu-py311'
     
@@ -157,7 +152,10 @@ def create_sagemaker_model(model_name, model_data_url, sagemaker_role, aws_regio
                     'SAGEMAKER_PROGRAM': 'inference.py',
                     'SAGEMAKER_SUBMIT_DIRECTORY': model_data_url,
                     'SAGEMAKER_CONTAINER_LOG_LEVEL': '20',
-                    'SAGEMAKER_REGION': aws_region
+                    'SAGEMAKER_REGION': aws_region,
+                    # UPDATED: Added safety timeouts for the internal TorchServe workers
+                    'SAGEMAKER_MODEL_SERVER_TIMEOUT': '600',
+                    'TS_DEFAULT_RESPONSE_TIMEOUT': '600'
                 }
             },
             ExecutionRoleArn=sagemaker_role
@@ -169,9 +167,7 @@ def create_sagemaker_model(model_name, model_data_url, sagemaker_role, aws_regio
 
 def create_endpoint_config(config_name, model_name, aws_region):
     """Create endpoint configuration"""
-    
     print(f"\n⚙️  Creating endpoint config: {config_name}")
-    
     sagemaker = boto3.client('sagemaker', region_name=aws_region)
     
     try:
@@ -192,9 +188,7 @@ def create_endpoint_config(config_name, model_name, aws_region):
 
 def create_or_update_endpoint(endpoint_name, config_name, aws_region):
     """Create or update endpoint"""
-    
     print(f"\n🚀 Deploying endpoint: {endpoint_name}")
-    
     sagemaker = boto3.client('sagemaker', region_name=aws_region)
     
     try:
@@ -213,9 +207,7 @@ def create_or_update_endpoint(endpoint_name, config_name, aws_region):
 
 def wait_for_endpoint(endpoint_name, aws_region):
     """Wait for endpoint to be InService"""
-    
     print(f"\n⏳ Waiting for endpoint...")
-    
     sagemaker = boto3.client('sagemaker', region_name=aws_region)
     
     import time
@@ -226,7 +218,6 @@ def wait_for_endpoint(endpoint_name, aws_region):
         try:
             response = sagemaker.describe_endpoint(EndpointName=endpoint_name)
             status = response['EndpointStatus']
-            
             print(f"   Status: {status} ({elapsed}s)")
             
             if status == 'InService':
@@ -246,7 +237,6 @@ def wait_for_endpoint(endpoint_name, aws_region):
 
 def deploy_model(args):
     """Main deployment function"""
-    
     print("="*70)
     print("🚀 MODEL DEPLOYMENT")
     print("="*70)
