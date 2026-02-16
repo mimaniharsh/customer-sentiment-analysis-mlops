@@ -45,24 +45,25 @@ jobs:
             --role ${{ secrets.SAGEMAKER_ROLE_ARN }} \
             --region ${{ vars.AWS_REGION }} \
             --output-file deployment_info.json
+      
       - name: Test endpoint
-              run: |
-                echo "🧪 Testing endpoint..."
-                TEST_TEXT="The flight was delayed and the staff was rude!"
-                
-                # Write the payload to a temporary file
-                echo "{\"text\": \"$TEST_TEXT\"}" > payload.json
-                
-                # Use fileb:// to pass the payload exactly as-is
-                aws sagemaker-runtime invoke-endpoint \
-                  --endpoint-name ${{ vars.ENDPOINT_NAME }} \
-                  --content-type application/json \
-                  --body fileb://payload.json \
-                  --region ${{ vars.AWS_REGION }} \
-                  response.json
-                
-                echo "📊 Prediction Result:"
-                cat response.json | python -m json.tool
+        run: |
+          echo "🧪 Testing endpoint..."
+          TEST_TEXT="The flight was delayed and the staff was rude!"
+          
+          # Write the payload to a temporary file
+          echo "{\"text\": \"$TEST_TEXT\"}" > payload.json
+          
+          # Use fileb:// to pass the payload exactly as-is
+          aws sagemaker-runtime invoke-endpoint \
+            --endpoint-name ${{ vars.ENDPOINT_NAME }} \
+            --content-type application/json \
+            --body fileb://payload.json \
+            --region ${{ vars.AWS_REGION }} \
+            response.json
+          
+          echo "📊 Prediction Result:"
+          cat response.json | python -m json.tool
       
       - name: Create summary
         run: |
