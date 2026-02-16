@@ -84,10 +84,13 @@ jobs:
 
           # Copy script from src to root for flat packaging
           cp src/model_train.py .
-          
+
           # Ensure dependencies are available inside the SageMaker container
-          echo "transformers" > requirements.txt
-          echo "scikit-learn" >> requirements.txt
+          # UPDATED: Added torch, pandas, and specific versions to match deployment
+          echo "torch==2.3.1" > requirements.txt
+          echo "transformers==4.44.2" >> requirements.txt
+          echo "scikit-learn==1.5.1" >> requirements.txt
+          echo "pandas==2.2.2" >> requirements.txt
           
           tar -cvzf sourcedir.tar.gz train.py model_train.py requirements.txt
           aws s3 cp sourcedir.tar.gz s3://${{ env.S3_BUCKET }}/${{ env.PROJECT_NAME }}/code/sourcedir.tar.gz
@@ -117,7 +120,8 @@ jobs:
               TrainingJobName=job_name,
               RoleArn='${{ env.SAGEMAKER_ROLE_ARN }}',
               AlgorithmSpecification={
-                  'TrainingImage': f'763104351884.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/pytorch-training:2.0.0-cpu-py310',
+                  # UPDATED: Using PyTorch 2.3.0 GPU Deep Learning Container
+                  'TrainingImage': f'763104351884.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/pytorch-training:2.3.0-gpu-py311-cu121-ubuntu20.04-sagemaker-v1.0',
                   'TrainingInputMode': 'File'
               },
               InputDataConfig=[{
@@ -133,9 +137,10 @@ jobs:
                   'S3OutputPath': 's3://${{ env.S3_BUCKET }}/${{ env.PROJECT_NAME }}/models/'
               },
               ResourceConfig={
-                  'InstanceType': 'ml.m5.xlarge',
+                  # UPDATED: Upgraded to GPU instance and increased volume size
+                  'InstanceType': 'ml.g4dn.xlarge',
                   'InstanceCount': 1,
-                  'VolumeSizeInGB': 10
+                  'VolumeSizeInGB': 30
               },
               # Added back mandatory field
               StoppingCondition={

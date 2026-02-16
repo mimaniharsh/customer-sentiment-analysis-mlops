@@ -58,7 +58,7 @@ def find_latest_model(s3_client, bucket_name, project_name):
         print(f"❌ Error searching S3: {e}")
     
     raise FileNotFoundError(
-        f"No trained model found in s3://{bucket_name}/{project_name}/models/. "
+        f"No trained model found in s3://{bucket_name}/{project_name}/models/.\n"
         "Please run training workflow first."
     )
 
@@ -91,7 +91,7 @@ def download_and_extract_model(s3_client, bucket_name, model_key):
     has_weights = any(f in files for f in ['model.safetensors', 'pytorch_model.bin'])
     
     if not all(f in files for f in required_files) or not has_weights:
-        raise FileNotFoundError(f"Missing required model files. Found: {files}")
+        raise FileNotFoundError(f"Missing required model files.\nFound: {files}")
     
     return True
 
@@ -120,9 +120,11 @@ def evaluate_model(args):
     tokenizer = DistilBertTokenizerFast.from_pretrained('./model')
     model = DistilBertForSequenceClassification.from_pretrained('./model')
     model.eval()
-    device = torch.device('cpu')
+    
+    # UPDATED: Dynamic device mapping (GPU if available, else CPU)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
-    print("✅ Model loaded successfully")
+    print(f"✅ Model loaded successfully on {device}")
     
     # Tokenize test data
     print("\n🔤 Tokenizing test data...")
@@ -142,7 +144,7 @@ def evaluate_model(args):
     
     with torch.no_grad():
         for i in range(len(test_dataset)):
-            if i % 500 == 0:
+            if i > 0 and i % 500 == 0:
                 print(f"   Processed {i}/{len(test_dataset)} samples...")
             
             item = test_dataset[i]
