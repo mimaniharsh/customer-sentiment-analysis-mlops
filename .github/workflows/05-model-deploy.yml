@@ -48,18 +48,14 @@ jobs:
       
       - name: Test endpoint
         run: |
-          ENDPOINT_NAME="${{ vars.ENDPOINT_NAME }}"
-          REGION="${{ vars.AWS_REGION }}"
-          TEST_TEXT="The flight was delayed by 3 hours and the staff was rude!"
-          
-          echo "🧪 Testing endpoint with sample text..."
-          echo "Text: $TEST_TEXT"
+          echo "🧪 Testing endpoint..."
+          TEST_TEXT="The flight was delayed and the staff was rude!"
           
           aws sagemaker-runtime invoke-endpoint \
-            --endpoint-name "$ENDPOINT_NAME" \
+            --endpoint-name ${{ vars.ENDPOINT_NAME }} \
             --content-type application/json \
             --body "{\"text\": \"$TEST_TEXT\"}" \
-            --region "$REGION" \
+            --region ${{ vars.AWS_REGION }} \
             response.json
           
           echo "📊 Prediction Result:"
@@ -79,8 +75,5 @@ jobs:
           cat response.json >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📝 Next Steps" >> $GITHUB_STEP_SUMMARY
-          echo "1. Make predictions using the endpoint" >> $GITHUB_STEP_SUMMARY
-          echo "2. Monitor endpoint metrics in CloudWatch" >> $GITHUB_STEP_SUMMARY
-          echo "3. Set up auto-scaling if needed" >> $GITHUB_STEP_SUMMARY
-          echo "4. **Remember to delete endpoint when done to avoid costs!**" >> $GITHUB_STEP_SUMMARY
+          echo "### ⚠️ Important" >> $GITHUB_STEP_SUMMARY
+          echo "Remember to delete the endpoint when done to avoid costs!" >> $GITHUB_STEP_SUMMARY
