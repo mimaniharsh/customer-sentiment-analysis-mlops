@@ -48,6 +48,9 @@ jobs:
       
       - name: Test endpoint
         run: |
+          echo "⏳ Waiting 30 seconds for endpoint container to fully initialize..."
+          sleep 30
+          
           echo "🧪 Testing endpoint..."
           TEST_TEXT="The flight was delayed and the staff was rude!"
           
@@ -55,10 +58,13 @@ jobs:
           echo "{\"text\": \"$TEST_TEXT\"}" > payload.json
           
           # Use fileb:// to pass the payload exactly as-is
+          # Added --cli-read-timeout to prevent timeout during the PyTorch cold-start
           aws sagemaker-runtime invoke-endpoint \
             --endpoint-name ${{ vars.ENDPOINT_NAME }} \
             --content-type application/json \
             --body fileb://payload.json \
+            --cli-connect-timeout 60 \
+            --cli-read-timeout 180 \
             --region ${{ vars.AWS_REGION }} \
             response.json
           
