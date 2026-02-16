@@ -11,6 +11,7 @@ import boto3
 import tarfile
 import shutil
 from datetime import datetime
+import time
 
 def find_latest_model(s3_client, bucket_name, project_name):
     """Find latest trained model in S3"""
@@ -43,12 +44,10 @@ def prepare_model_for_deployment(s3_client, bucket_name, project_name, model_uri
     """Download, add inference script, and repackage model"""
     print("\n📦 Preparing model for deployment...")
     
-    # Download model
     model_key = model_uri.replace(f"s3://{bucket_name}/", "")
     print(f"📥 Downloading {model_key}...")
     s3_client.download_file(bucket_name, model_key, 'model.tar.gz')
     
-    # Extract
     print("📂 Extracting model...")
     os.makedirs('./model', exist_ok=True)
     with tarfile.open('model.tar.gz', 'r:gz') as tar:
@@ -56,7 +55,9 @@ def prepare_model_for_deployment(s3_client, bucket_name, project_name, model_uri
     
     os.remove('model.tar.gz')
     
-    # Add inference script
+    # Create the 'code' directory mandated by SageMaker
+    os.makedirs('./model/code', exist_ok=True)
+    
     print("📝 Creating inference script...")
     inference_code = '''import json
 import torch
@@ -107,30 +108,22 @@ def output_fn(prediction, accept):
         return json.dumps(prediction), accept
     raise ValueError(f"Unsupported accept type: {accept}")
 '''
-    with open('./model/inference.py', 'w') as f:
+    with open('./model/code/inference.py', 'w') as f:
         f.write(inference_code)
-    print("   ✅ inference.py")
+    print("   ✅ code/inference.py")
     
-    # Add requirements (UPDATED: Removed torch to prevent massive cold start download)
-    print("📝 Creating requirements.txt...")
-    requirements = 'transformers==4.44.2\n'
-    with open('./model/requirements.txt', 'w') as f:
-        f.write(requirements)
-    print("   ✅ requirements.txt")
+    # Removed requirements.txt generation: AWS PyTorch DLC already has transformers natively!
     
-    # Repackage
     print("\n🗜️  Creating deployment artifact...")
     with tarfile.open('deploy_model.tar.gz', 'w:gz') as tar:
         tar.add('./model', arcname='.')
     
-    # Upload
     deploy_key = f"{project_name}/models/deploy/model.tar.gz"
     print(f"📤 Uploading to s3://{bucket_name}/{deploy_key}")
     s3_client.upload_file('deploy_model.tar.gz', bucket_name, deploy_key)
     
     deploy_uri = f"s3://{bucket_name}/{deploy_key}"
     
-    # Cleanup
     shutil.rmtree('./model')
     os.remove('deploy_model.tar.gz')
     
@@ -149,11 +142,10 @@ def create_sagemaker_model(model_name, model_data_url, sagemaker_role, aws_regio
                 'Image': image_uri,
                 'ModelDataUrl': model_data_url,
                 'Environment': {
-                    'SAGEMAKER_PROGRAM': 'inference.py',
-                    'SAGEMAKER_SUBMIT_DIRECTORY': model_data_url,
+                    # REMOVED SAGEMAKER_PROGRAM and SAGEMAKER_SUBMIT_DIRECTORY
+                    # The container natively looks for code/inference.py now!
                     'SAGEMAKER_CONTAINER_LOG_LEVEL': '20',
                     'SAGEMAKER_REGION': aws_region,
-                    # UPDATED: Added safety timeouts for the internal TorchServe workers
                     'SAGEMAKER_MODEL_SERVER_TIMEOUT': '600',
                     'TS_DEFAULT_RESPONSE_TIMEOUT': '600'
                 }
@@ -192,12 +184,24 @@ def create_or_update_endpoint(endpoint_name, config_name, aws_region):
     sagemaker = boto3.client('sagemaker', region_name=aws_region)
     
     try:
-        sagemaker.describe_endpoint(EndpointName=endpoint_name)
-        print("⚠️  Updating existing endpoint...")
-        sagemaker.update_endpoint(
-            EndpointName=endpoint_name,
-            EndpointConfigName=config_name
-        )
+        response = sagemaker.describe_endpoint(EndpointName=endpoint_name)
+        status = response['EndpointStatus']
+        
+        # Safety net: If the previous timeout left it in a failed state, delete and recreate
+        if status == 'Failed':
+            print("⚠️  Endpoint is in Failed state. Deleting and recreating...")
+            sagemaker.delete_endpoint(EndpointName=endpoint_name)
+            time.sleep(10)
+            sagemaker.create_endpoint(
+                EndpointName=endpoint_name,
+                EndpointConfigName=config_name
+            )
+        else:
+            print("⚠️  Updating existing endpoint...")
+            sagemaker.update_endpoint(
+                EndpointName=endpoint_name,
+                EndpointConfigName=config_name
+            )
     except sagemaker.exceptions.ClientError:
         print("🆕 Creating new endpoint...")
         sagemaker.create_endpoint(
@@ -210,7 +214,6 @@ def wait_for_endpoint(endpoint_name, aws_region):
     print(f"\n⏳ Waiting for endpoint...")
     sagemaker = boto3.client('sagemaker', region_name=aws_region)
     
-    import time
     max_wait = 600
     elapsed = 0
     
@@ -243,13 +246,9 @@ def deploy_model(args):
     
     s3_client = boto3.client('s3', region_name=args.region)
     
-    # Find model
     model_uri = find_latest_model(s3_client, args.bucket, args.project)
-    
-    # Prepare for deployment
     deploy_uri = prepare_model_for_deployment(s3_client, args.bucket, args.project, model_uri)
     
-    # Create resources
     timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
     model_name = f"{args.project}-model-{timestamp}"
     config_name = f"{args.project}-config-{timestamp}"
@@ -259,7 +258,6 @@ def deploy_model(args):
     create_or_update_endpoint(args.endpoint, config_name, args.region)
     wait_for_endpoint(args.endpoint, args.region)
     
-    # Save deployment info
     deployment_info = {
         'model_name': model_name,
         'config_name': config_name,
