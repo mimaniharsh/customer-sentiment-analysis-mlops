@@ -74,33 +74,32 @@ The system goes well beyond a simple positive/negative classifier. It incorporat
 
 ## 🖥️ Demo
 
-> **Add a screenshot or screen recording here.** A 20–30 second GIF or screenshot set is the single highest-impact addition you can make to this README — it lets a recruiter or hiring manager understand the project in 5 seconds without reading a line of text.
+### Intelligence Hub — Operations Command Centre
 
-**Recommended tools:** [Kap](https://getkap.co) (macOS) · [ShareX](https://getsharex.com) (Windows) · [Loom](https://loom.com) (any OS)
+![Intelligence Hub Dashboard](docs/screenshots/intelligence-hub.png)
 
-**Suggested captures:**
-- The Single Analysis page predicting a sarcastic tweet (showing the sarcasm gauge)
-- The Intelligence Hub heatmap with the full airline scoreboard visible
-- The Live Feed simulation running
+500 records analysed in real time · automated crisis alert detection · airline reputation scoreboard · issue category breakdown · severity matrix · trending keyword extraction · live feed simulation
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  ✈ SentimentIQ  │ Single Analysis  │ Batch Analytics  │ Intel Hub │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  "Oh fantastic, another 3-hour delay. Best airline ever! 🙂"    │
-│                                                                   │
-│  😞 NEGATIVE Sentiment          Confidence: 89%                  │
-│  Sentiment Score: −0.84                                          │
-│                                                                   │
-│  😊 Positive  ██░░░░░░░░░░░░   8%                               │
-│  😐 Neutral   ███░░░░░░░░░░░  12%                               │
-│  😞 Negative  ████████████░░  80%  ← predicted                  │
-│                                                                   │
-│  🎭 Sarcasm Risk ●●●●●●●●●○  HIGH — 82%                        │
-│  Positive wording detected with negative prediction.             │
-└─────────────────────────────────────────────────────────────────┘
-```
+---
+
+### Single Analysis — Sarcasm Detection in Action
+
+![Single Analysis — Sarcasm Detection](docs/screenshots/single-analysis-sarcasm.png)
+
+The platform correctly classifies a sarcastic tweet as **Negative** despite strongly positive wording — and flags it with an **82% HIGH sarcasm risk score**:
+
+| Field | Result |
+|---|---|
+| Input | *"Oh fantastic, another 3-hour delay. Best airline ever!"* |
+| Prediction | **NEGATIVE** |
+| Confidence | 89% |
+| Sentiment Score | −0.84 |
+| Positive probability | 8% |
+| Neutral probability | 12% |
+| Negative probability | **80%** |
+| Sarcasm Risk | **HIGH — 82%** |
+| Sarcasm Signal | Positive wording ("fantastic", "best") with a negative model prediction |
+
 
 ## 🏗️ System Architecture
 
