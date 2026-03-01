@@ -1,0 +1,64 @@
+name: 04 - Model Evaluation
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["03 - Model Training (SageMaker)"]
+    types:
+      - completed
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  evaluate-model:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          # UPDATED: Pinned dependencies to exactly match training/deployment requirements
+          pip install boto3==1.34.162 pandas==2.2.2 numpy==1.26.4 scikit-learn==1.5.1 torch==2.3.1 transformers==4.44.2 matplotlib seaborn
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      
+      - name: Evaluate model
+        run: |
+          python src/model_eval.py \
+            --bucket ${{ vars.S3_BUCKET }} \
+            --project ${{ vars.PROJECT_NAME }} \
+            --region ${{ vars.AWS_REGION }} \
+            --output-path /tmp/evaluation
+      
+      - name: Download and display results
+        run: |
+          aws s3 cp s3://${{ vars.S3_BUCKET }}/${{ vars.PROJECT_NAME }}/evaluation/evaluation_results.json ./
+          echo "📊 Evaluation Metrics:"
+          cat evaluation_results.json | python -m json.tool
+      
+      - name: Create summary
+        run: |
+          echo "## ✅ Model Evaluation Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Test Metrics" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`json" >> $GITHUB_STEP_SUMMARY
+          cat evaluation_results.json >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📈 Visualizations" >> $GITHUB_STEP_SUMMARY
+          echo "- Confusion Matrix: s3://${{ vars.S3_BUCKET }}/${{ vars.PROJECT_NAME }}/evaluation/confusion_matrix.png" >> $GITHUB_STEP_SUMMARY

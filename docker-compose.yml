@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: sentiment-api
+    ports:
+      - "8000:8000"
+    environment:
+      # Updated to match GitHub Variables
+      - SAGEMAKER_ENDPOINT=${ENDPOINT_NAME:-sentiment-analysis-endpoint}
+      - AWS_REGION=${AWS_REGION:-ap-south-1}
+      # These pull from the host environment/secrets during deployment
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: sentiment-web
+    ports:
+      - "5000:5000"
+    environment:
+      - API_URL=http://api:8000
+    depends_on:
+      - api
+    restart: unless-stopped
+
+networks:
+  default:
+    name: sentiment-analysis-network
