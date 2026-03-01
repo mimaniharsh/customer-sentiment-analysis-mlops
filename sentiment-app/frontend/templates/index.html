@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sentiment Intelligence Platform</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body>
+<div class="page-wrapper">
+
+  <!-- ── Navigation ── -->
+  <nav class="topnav">
+    <div class="nav-brand">
+      <div class="nav-brand-icon">✈</div>
+      <div class="nav-brand-text">Sentiment<span>IQ</span></div>
+    </div>
+    <div class="nav-links">
+      <a href="/" class="active">Single Analysis</a>
+      <a href="/batch">Batch Analytics</a>
+      <a href="/intelligence">Intelligence Hub</a>
+    </div>
+    <div class="nav-badge">DistilBERT · AWS SageMaker</div>
+  </nav>
+
+  <!-- ── Page Header ── -->
+  <div class="page-header">
+    <h1>Analyse <span class="highlight">Customer Sentiment</span></h1>
+    <p>Classify any text into Positive, Neutral, or Negative — with sarcasm detection and confidence scoring.</p>
+  </div>
+
+  <!-- ── Main Grid ── -->
+  <div class="analysis-grid">
+
+    <!-- LEFT: Input Panel -->
+    <div class="input-panel">
+      <div class="card">
+        <div class="card-title">Input Text</div>
+
+        <div class="textarea-wrapper">
+          <textarea
+            class="sentiment-textarea"
+            id="textInput"
+            rows="7"
+            placeholder="Paste a tweet, review, survey response, or any customer text here…"
+          ></textarea>
+          <div class="char-count" id="charCount">0 / 512</div>
+        </div>
+
+        <div class="examples-row" style="margin-top:14px;">
+          <div class="examples-label">Quick Examples</div>
+          <div class="examples-chips">
+            <button class="chip pos" onclick="setExample('The boarding was seamless and the crew was absolutely wonderful. Best flight I have taken in years!')">😊 Positive</button>
+            <button class="chip neu" onclick="setExample('Flight departed on time and arrived as scheduled. Nothing particularly good or bad.')">😐 Neutral</button>
+            <button class="chip neg" onclick="setExample('Delayed by 4 hours, lost luggage, and zero communication from staff. Completely unacceptable.')">😞 Negative</button>
+            <button class="chip sar" onclick="setExample('Oh fantastic, another delay. Because waiting 3 hours at the gate is exactly what I needed today. Great service as always!')">🎭 Sarcastic</button>
+          </div>
+        </div>
+
+        <div class="btn-row" style="margin-top:16px;">
+          <button class="btn btn-primary" id="analyseBtn" onclick="runAnalysis()">
+            <span>▶</span> Analyse
+          </button>
+          <button class="btn btn-ghost" onclick="clearAll()">Clear</button>
+        </div>
+      </div>
+
+      <!-- History -->
+      <div id="historySection" class="history-section" style="display:none;">
+        <div class="history-title">Recent Analyses</div>
+        <div class="history-list" id="historyList"></div>
+      </div>
+    </div>
+
+    <!-- RIGHT: Result Panel -->
+    <div id="resultCol">
+
+      <!-- Placeholder -->
+      <div class="results-placeholder" id="placeholder">
+        <div class="results-placeholder-icon">📊</div>
+        <div class="results-placeholder-text">Enter text on the left to see analysis</div>
+      </div>
+
+      <!-- Loading -->
+      <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-ring"></div>
+        <div class="loading-text">Analysing sentiment…</div>
+      </div>
+
+      <!-- Results -->
+      <div id="resultPanel" class="result-panel hidden">
+
+        <!-- Verdict Banner -->
+        <div class="result-verdict" id="verdictBanner">
+          <div class="verdict-top">
+            <div class="verdict-emoji" id="verdictEmoji">—</div>
+            <div class="verdict-badge" id="verdictBadge">—</div>
+          </div>
+          <div class="verdict-label" id="verdictLabel">—</div>
+          <div class="verdict-interpretation" id="verdictInterpretation">—</div>
+        </div>
+
+        <!-- Metrics Row -->
+        <div class="metrics-grid">
+          <div class="metric-box">
+            <div class="metric-box-label">Confidence</div>
+            <div class="metric-box-value" id="metricConfidence">—</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-box-label">Sentiment Score</div>
+            <div class="metric-box-value" id="metricScore">—</div>
+          </div>
+        </div>
+
+        <!-- Probability Bars -->
+        <div class="prob-section">
+          <div class="prob-section-title">Probability Distribution</div>
+          <div class="prob-row">
+            <div class="prob-emoji">😊</div>
+            <div class="prob-name">Positive</div>
+            <div class="prob-track"><div class="prob-fill positive" id="barPos"></div></div>
+            <div class="prob-pct" id="pctPos">0%</div>
+          </div>
+          <div class="prob-row">
+            <div class="prob-emoji">😐</div>
+            <div class="prob-name">Neutral</div>
+            <div class="prob-track"><div class="prob-fill neutral" id="barNeu"></div></div>
+            <div class="prob-pct" id="pctNeu">0%</div>
+          </div>
+          <div class="prob-row">
+            <div class="prob-emoji">😞</div>
+            <div class="prob-name">Negative</div>
+            <div class="prob-track"><div class="prob-fill negative" id="barNeg"></div></div>
+            <div class="prob-pct" id="pctNeg">0%</div>
+          </div>
+        </div>
+
+        <!-- Sarcasm Meter -->
+        <div class="sarcasm-section">
+          <div class="sarcasm-header">
+            <div class="sarcasm-title">🎭 Sarcasm Detection</div>
+            <div class="sarcasm-tooltip" title="Computed from linguistic patterns: positive wording + negative prediction, rhetorical markers, and confidence ambiguity.">ℹ How is this computed?</div>
+          </div>
+          <div class="sarcasm-gauge">
+            <div class="gauge-ring-wrap">
+              <canvas id="sarcasmCanvas" width="72" height="72"></canvas>
+              <div class="gauge-ring-center">
+                <div class="gauge-pct" id="sarcasmPct">0%</div>
+                <div class="gauge-label">RISK</div>
+              </div>
+            </div>
+            <div class="sarcasm-detail">
+              <div class="sarcasm-level" id="sarcasmLevel">—</div>
+              <div class="sarcasm-desc" id="sarcasmDesc">—</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Model Info Footer ── -->
+  <div style="margin-top:48px; display:grid; grid-template-columns:repeat(3,1fr); gap:14px;">
+
+    <div class="card" style="padding:18px;">
+      <div class="card-title">Model</div>
+      <div style="font-size:0.9rem; color:var(--text-1); font-weight:600; margin-bottom:4px;">DistilBERT · 66M params</div>
+      <div style="font-size:0.8rem; color:var(--text-3);">Fine-tuned on 14,640 airline tweets · 3-class classification</div>
+    </div>
+
+    <div class="card" style="padding:18px;">
+      <div class="card-title">Performance</div>
+      <div style="font-size:0.9rem; color:var(--text-1); font-weight:600; margin-bottom:4px;">~80% Accuracy · 0.78 F1</div>
+      <div style="font-size:0.8rem; color:var(--text-3);">Class-weighted loss · stratified evaluation · ~200ms latency</div>
+    </div>
+
+    <div class="card" style="padding:18px;">
+      <div class="card-title">Infrastructure</div>
+      <div style="font-size:0.9rem; color:var(--text-1); font-weight:600; margin-bottom:4px;">AWS SageMaker · ml.m5.large</div>
+      <div style="font-size:0.8rem; color:var(--text-3);">Deployed via GitHub Actions CI/CD · PyTorch 2.3 + Transformers 4.44</div>
+    </div>
+
+  </div>
+
+  <!-- ── Footer ── -->
+  <footer class="page-footer">
+    <div class="footer-brand">
+      <span class="footer-dot"></span>
+      SentimentIQ · Powered by DistilBERT on AWS SageMaker
+    </div>
+    <div class="footer-links">
+      <span>🔒 Data not stored</span>
+      <span>⚡ ~200ms inference</span>
+    </div>
+  </footer>
+
+</div>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
