@@ -1,88 +1,391 @@
 <div align="center">
 
+<br />
+
 # Sentient Intelligence Platform
 
-**Enterprise Customer Sentiment & Branding Intelligence**
+**Transform every customer signal into a strategic decision.**
 
-*Built for the scale of modern enterprise. Designed for the clarity of executive decision-making.*
+Sentient is a production-grade ML platform that classifies sentiment, detects urgency, quantifies business impact, and surfaces root-cause clusters — across every channel, at enterprise scale.
 
-[![CI](https://github.com/your-org/sentient-platform/actions/workflows/01-ci.yml/badge.svg)](https://github.com/your-org/sentient-platform/actions)
-[![License: MIT](https://img.shields.io/badge/License-MIT-violet.svg)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://python.org)
-[![Next.js 15](https://img.shields.io/badge/Next.js-15-black.svg)](https://nextjs.org)
+<br />
+
+[![CI](https://img.shields.io/github/actions/workflow/status/mimaniharsh/customer-sentiment-analysis-mlops/01-ci.yml?label=CI&style=flat-square&logo=github)](https://github.com/mimaniharsh/customer-sentiment-analysis-mlops/actions)
+[![Model](https://img.shields.io/badge/Model-DistilBERT-4f46e5?style=flat-square&logo=huggingface&logoColor=white)](https://huggingface.co/distilbert-base-uncased)
+[![AWS](https://img.shields.io/badge/Infra-SageMaker%20%7C%20S3%20%7C%20ECR-FF9900?style=flat-square&logo=amazonaws&logoColor=white)](https://aws.amazon.com/sagemaker/)
+[![Next.js](https://img.shields.io/badge/Frontend-Next.js%2015-000000?style=flat-square&logo=nextdotjs)](https://nextjs.org)
+[![Python](https://img.shields.io/badge/Python-3.11-3776ab?style=flat-square&logo=python&logoColor=white)](https://python.org)
+[![License](https://img.shields.io/badge/License-MIT-22c55e?style=flat-square)](LICENSE)
+
+<br />
+
+[**Live Demo**](#-demo-guide) · [**API Docs**](http://localhost:8000/docs) · [**Architecture**](#architecture) · [**Quick Start**](#quick-start)
+
+<br />
 
 </div>
 
 ---
 
-## What Is Sentient?
+## What Sentient Does
 
-Sentient is a **production-grade, multi-tenant SaaS platform** that transforms raw customer feedback — tweets, support tickets, app reviews, chat logs, and long-form surveys — into executive-grade intelligence. Powered by a fine-tuned DistilBERT transformer pipeline on AWS SageMaker, Sentient delivers sentiment classification, urgency triage, severity scoring, business impact weighting, explainability, and proactive model drift alerting at enterprise scale.
+Most companies drown in unstructured feedback. Sentient turns the noise into a clear signal.
 
-Organizations running Sentient gain a single pane of glass across every customer signal: from individual message-level explanations to board-ready KPI dashboards, scenario simulators, and automated root-cause clustering — all in real time, all under full tenant isolation with role-based access control.
+Every customer message — a tweet, a support ticket, an app review, a chat log — passes through a fine-tuned DistilBERT pipeline that produces far more than a sentiment label. It produces an *intelligence brief*: how negative, how urgent, what business area is affected, how confident the model is, which tokens drove the decision, and what it means for the bottom line.
 
----
+The output flows into an executive dashboard where leaders see trends, clusters, and simulated impact — not raw data.
 
-## Architecture Overview
+<br />
+
+## The Intelligence Pipeline
+
+Each message passes through six sequential analysis layers:
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        Sentient Intelligence Platform                   │
-│                                                                         │
-│  ┌──────────────┐    ┌──────────────────┐    ┌────────────────────────┐│
-│  │  Next.js 15  │───▶│  FastAPI Backend  │───▶│  SageMaker Endpoint   ││
-│  │  Dashboard   │    │  (multi-tenant,   │    │  DistilBERT NLP       ││
-│  │  (TypeScript)│◀───│   RBAC, JWT)      │    │  (ap-south-1)         ││
-│  └──────────────┘    └──────────────────┘    └────────────────────────┘│
-│                               │   │                                     │
-│                    ┌──────────┘   └─────────┐                          │
-│                    ▼                        ▼                           │
-│           ┌──────────────┐       ┌────────────────────┐               │
-│           │  PostgreSQL  │       │  Celery + Redis     │               │
-│           │  (multi-     │       │  (drift detection,  │               │
-│           │   tenant DB) │       │   metric snapshots, │               │
-│           └──────────────┘       │   report generation)│               │
-│                                  └────────────────────┘               │
-│                                                                         │
-│  Secret Management: AWS Secrets Manager (prod) · .env file (dev)       │
-│  Observability:     Prometheus · Sentry · Structured Logs              │
-│  CI/CD:             GitHub Actions · OIDC · ECR · ECS                  │
-└─────────────────────────────────────────────────────────────────────────┘
+  Input Text
+      │
+      ▼
+┌─────────────────────────────────────────────────────────┐
+│  1. Sentiment Classification                             │
+│     DistilBERT → Positive / Neutral / Negative          │
+│     + calibrated confidence via temperature scaling      │
+├─────────────────────────────────────────────────────────┤
+│  2. Multi-Label Attribute Tagging                        │
+│     Pricing · Support · Reliability · Onboarding        │
+│     Performance · Features · Security                    │
+├─────────────────────────────────────────────────────────┤
+│  3. Urgency Detection                                    │
+│     Critical / High / Medium / Low                       │
+│     Composite: keyword signal + probability mass         │
+├─────────────────────────────────────────────────────────┤
+│  4. Severity & Business Impact Scoring                   │
+│     Continuous 0.00–1.00 score                          │
+│     Amplified by high-risk attribute co-occurrence       │
+├─────────────────────────────────────────────────────────┤
+│  5. Token-Level Explainability                           │
+│     Attention-proxy saliency                             │
+│     Top 5 driver tokens per prediction                   │
+├─────────────────────────────────────────────────────────┤
+│  6. Embedding Fingerprint                                │
+│     For cluster membership lookup                        │
+└─────────────────────────────────────────────────────────┘
+      │
+      ▼
+  Structured JSON  →  PostgreSQL  →  Dashboard
 ```
 
----
+All six layers resolve in a single API call, typically under **300ms**.
 
-## Core Capabilities
+<br />
 
-### 🧠 ML Intelligence Pipeline
-| Capability | Detail |
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│                        Sentient Platform — AWS ap-south-1                │
+│                                                                          │
+│  ┌─────────────────┐   REST    ┌──────────────────┐  invoke   ┌───────┐ │
+│  │  Next.js 15     │ ────────▶ │  FastAPI          │ ────────▶ │  SM   │ │
+│  │  Dashboard      │           │  (multi-tenant,   │           │  End  │ │
+│  │  TypeScript     │ ◀──────── │  RBAC, JWT)       │           │  point│ │
+│  └─────────────────┘  JSON     └──────────────────┘           └───────┘ │
+│                                        │                                 │
+│                          ┌─────────────┴────────────┐                   │
+│                          ▼                          ▼                   │
+│                  ┌──────────────┐        ┌─────────────────────┐        │
+│                  │  PostgreSQL  │        │  Celery + Redis      │        │
+│                  │  Row-level   │        │  Drift detection     │        │
+│                  │  tenant ISO  │        │  Metric snapshots    │        │
+│                  └──────────────┘        │  Report generation   │        │
+│                                          └─────────────────────┘        │
+│                                                                          │
+│  CI/CD    GitHub Actions → ECR → ECS   (OIDC · zero static keys)        │
+│  ML Ops   S3 → SageMaker Training (GPU) → Model Registry → Endpoint     │
+│  Secrets  AWS Secrets Manager (prod) · .env (dev)                       │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+<br />
+
+## Capabilities
+
+| Layer | Capability |
 |---|---|
-| Sentiment Classification | Positive · Neutral · Negative via fine-tuned DistilBERT |
-| Multi-Label Attributes | Pricing · Support · Reliability · Onboarding · Features · Performance · Security |
-| Urgency Detection | Critical / High / Medium / Low with composite keyword + probability scoring |
-| Severity Scoring | 0–100 composite score from sentiment probability + urgency |
-| Business Impact Weighting | Amplified by high-risk attribute co-occurrence |
-| Calibrated Confidence | Temperature-scaled softmax probabilities |
-| Explainability | Token-level saliency (attention proxy / Integrated Gradients ready) |
-| Drift Detection | PSI + KS statistic on rolling 12-week sentiment distributions |
-| Root-Cause Clustering | Embedding-based K-means topic grouping |
-| Model Versioning | Every prediction stamped with model version + endpoint provenance |
+| **ML** | Fine-tuned DistilBERT · Calibrated confidence · Temperature scaling |
+| **Classification** | 3-class sentiment · 7-attribute multi-label tagging |
+| **Signals** | Urgency (4 levels) · Severity score · Business impact score |
+| **Explainability** | Token-level saliency · Top-5 driver tokens per prediction |
+| **Drift** | PSI + KS statistic · Rolling 12-week distribution monitoring |
+| **Clustering** | Embedding-based root-cause topic grouping |
+| **Platform** | Multi-tenant · RBAC (Owner / Admin / Analyst / Viewer) · Rate limiting |
+| **Ops** | Celery workers · Redis queues · Prometheus metrics · Sentry tracing |
 
-### 📊 Dashboard & Analytics
-- Executive KPI overview with 8-metric card grid
-- 30-day sentiment trend area chart with area fills
-- Urgency breakdown horizontal bar chart
-- Attribute heatmap (7 attributes × 3 sentiments)
-- Model drift line chart with threshold reference line
-- Root-cause cluster cards with theme, count, severity, and top terms
-- Business impact scenario simulator (interactive sliders)
+<br />
 
-### 🏢 Enterprise Platform
-- **Multi-tenancy** — Full row-level tenant isolation on every DB table and API call
-- **RBAC** — Owner / Admin / Analyst / Viewer roles with fine-grained endpoint protection
-- **Rate Limiting** — Per-IP via SlowAPI, configurable per plan
-- **Background Workers** — Celery + Redis for async metric snapshots, drift checks, and report generation
-- **Exportable Reports** — S3-backed PDF/XLSX report generation pipeline
+---
+
+## 🎬 Demo Guide
+
+The fastest way to see Sentient in action. The demo script feeds real customer feedback through the running platform and prints a colour-coded intelligence brief for every message in real time.
+
+### Prerequisites
+
+```bash
+# Platform must be running
+docker compose up
+
+# One dependency for the demo script
+pip install requests
+```
+
+---
+
+### Mode 1 — Live Stream *(best for stakeholder demos)*
+
+Streams messages one at a time with a configurable delay. Each message renders as a colour-coded intelligence card in the terminal, while the dashboard at **http://localhost:3000** updates live.
+
+```bash
+# Works immediately — no CSV required
+python scripts/demo_live_stream.py
+
+# Stream your Tweets.csv at a natural pace
+python scripts/demo_live_stream.py --file Tweets.csv --delay 1.0
+
+# Cinematic mode — 2 second pause between messages
+python scripts/demo_live_stream.py --file Tweets.csv --delay 2.0 --limit 50 --shuffle
+
+# Custom CSV with a non-standard text column
+python scripts/demo_live_stream.py --file reviews.csv --text-col "review_text"
+```
+
+**Terminal output for each message:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ #0042  Third delay this week. No explanation, no apology.       │
+│                                                                  │
+│  Sentiment  NEGATIVE    Confidence 94.3%                        │
+│  Urgency    HIGH        Impact     0.81/1.00                    │
+│  Attributes reliability, support                                 │
+│  ████████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░  │
+│  pos 4%  neu 2%  neg 94%                            187ms       │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### Mode 2 — Batch Ingest *(fastest — populate the dashboard in seconds)*
+
+Sends messages in configurable batches. No delay. Processes thousands of rows per minute. Use this to seed the analytics dashboard before a live demo.
+
+```bash
+python scripts/demo_live_stream.py --mode batch --file Tweets.csv
+python scripts/demo_live_stream.py --mode batch --file Tweets.csv --batch 50
+```
+
+---
+
+### Mode 3 — Full CSV Upload *(structured report output)*
+
+Uploads the entire file to the `/predict/csv` endpoint. Returns a structured JSON report, highlights the most critical messages, and saves results to `demo_results.json`.
+
+```bash
+python scripts/demo_live_stream.py --mode csv-upload --file Tweets.csv
+```
+
+```
+✓ Upload complete — 14,640 rows analysed in 48.2s
+
+⚠ 312 CRITICAL messages found:
+
+  ● [0.94] Lost my luggage again. This is the second time in a month...
+  ● [0.91] Customer support hung up on me after 45 minutes on hold...
+  ● [0.89] Cancelled my flight with zero notice and no hotel voucher...
+
+Summary:
+  Positive:  5,821  (39.8%)
+  Neutral:   3,104  (21.2%)
+  Negative:  5,715  (39.0%)
+  Critical:    312   (2.1%)
+  Avg Confidence: 87.4%
+```
+
+---
+
+### Mode 4 — Direct API *(curl / Postman / code)*
+
+```bash
+# Single prediction
+curl -X POST http://localhost:8000/api/v1/predict \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Three hour delay and nobody at the gate to help us."}'
+
+# Batch — up to 500 texts in one call
+curl -X POST http://localhost:8000/api/v1/predict/batch \
+  -H "Content-Type: application/json" \
+  -d '{"texts": ["Great flight!", "Terrible service", "It was fine"]}'
+
+# Upload a CSV file
+curl -X POST http://localhost:8000/api/v1/predict/csv \
+  -F "file=@Tweets.csv"
+```
+
+---
+
+### Dashboard Pages
+
+| Page | URL | What you see |
+|---|---|---|
+| Overview | http://localhost:3000 | KPI cards · health score · trend direction |
+| Analytics | http://localhost:3000/analytics | Sentiment timeseries · attribute heatmap |
+| Clusters | http://localhost:3000/clusters | Root-cause topic groupings |
+| Reports | http://localhost:3000/reports | Exportable executive summaries |
+| API Docs | http://localhost:8000/docs | Full interactive Swagger UI |
+
+<br />
+
+---
+
+## Quick Start
+
+### 1 — Clone
+
+```bash
+git clone https://github.com/mimaniharsh/customer-sentiment-analysis-mlops.git
+cd customer-sentiment-analysis-mlops
+```
+
+### 2 — Configure
+
+```bash
+cp .env.example .env
+```
+
+Minimum required values in `.env`:
+
+```env
+AWS_ACCESS_KEY_ID=your-key
+AWS_SECRET_ACCESS_KEY=your-secret
+AWS_REGION=ap-south-1
+SAGEMAKER_ENDPOINT_NAME=customer-sentiment-analysis-mlops-endpoint
+S3_BUCKET=your-bucket-name
+APP_SECRET_KEY=any-32-character-string
+JWT_SECRET_KEY=any-other-32-character-string
+```
+
+### 3 — Start
+
+```bash
+docker compose up --build
+```
+
+First build takes ~4 minutes. Subsequent starts take ~20 seconds.
+
+Six services start: PostgreSQL · Redis · FastAPI · Celery Worker · Celery Beat · Next.js
+
+### 4 — Run the Demo
+
+```bash
+pip install requests
+python scripts/demo_live_stream.py
+```
+
+Open http://localhost:3000. The dashboard updates in real time as messages are processed.
+
+<br />
+
+---
+
+## ML Training Pipeline
+
+Train a new model via GitHub Actions — no local GPU required.
+
+**1.** Go to **Actions → ML — Train & Deploy SageMaker Model**  
+**2.** Click **Run workflow** and set epochs + batch size  
+**3.** The pipeline runs four stages automatically:
+
+```
+Data Preprocessing   (~5 min)   Kaggle → clean → split → S3
+SageMaker Training   (~35 min)  ml.g4dn.xlarge GPU · DistilBERT fine-tune
+Model Evaluation     (~5 min)   F1 · accuracy · confusion matrix
+Endpoint Deployment  (~10 min)  Package → create/update SageMaker endpoint
+```
+
+### Required Secrets & Variables
+
+| GitHub Secret | Description |
+|---|---|
+| `AWS_ROLE_ARN` | IAM role for GitHub OIDC (replaces static keys) |
+| `SAGEMAKER_ROLE_ARN` | SageMaker execution role |
+| `KAGGLE_USERNAME` | Kaggle account |
+| `KAGGLE_KEY` | Kaggle API key |
+
+| GitHub Variable | Example |
+|---|---|
+| `AWS_REGION` | `ap-south-1` |
+| `S3_BUCKET` | `your-bucket` |
+| `PROJECT_NAME` | `customer-sentiment-analysis-mlops` |
+| `ENDPOINT_NAME` | `customer-sentiment-analysis-mlops-endpoint` |
+
+<br />
+
+---
+
+## API Reference
+
+Base path: `/api/v1/` · Full docs: http://localhost:8000/docs
+
+### Prediction Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/predict` | Single text — full 6-layer analysis |
+| `POST` | `/predict/batch` | Up to 500 texts in one call |
+| `POST` | `/predict/csv` | Upload CSV · up to 10,000 rows |
+
+### Analytics Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/analytics/overview` | Executive KPI summary |
+| `GET` | `/analytics/timeseries` | 30-day sentiment trend |
+| `GET` | `/analytics/attributes` | Attribute heatmap data |
+| `GET` | `/analytics/urgency` | Urgency distribution |
+| `GET` | `/analytics/drift` | PSI / KS drift history |
+| `GET` | `/analytics/clusters` | Root-cause cluster insights |
+| `GET` | `/analytics/business-impact` | Scenario simulation |
+
+### Example Response
+
+```json
+{
+  "sentiment": "negative",
+  "sentiment_score": -0.8841,
+  "confidence": 0.9431,
+  "probabilities": {
+    "positive": 0.0281,
+    "neutral": 0.0288,
+    "negative": 0.9431
+  },
+  "urgency": "high",
+  "urgency_score": 0.7821,
+  "severity_score": 0.8743,
+  "business_impact_score": 0.8156,
+  "attributes": ["support", "reliability"],
+  "attribute_scores": { "support": 0.67, "reliability": 0.33 },
+  "explanation": {
+    "sentiment_label": "negative",
+    "top_tokens": [
+      { "token": "terrible", "importance": 0.3214 },
+      { "token": "unhelpful", "importance": 0.2891 }
+    ],
+    "method": "attention_proxy"
+  },
+  "latency_ms": 187
+}
+```
+
+<br />
 
 ---
 
@@ -91,251 +394,66 @@ Organizations running Sentient gain a single pane of glass across every customer
 ```
 sentient-platform/
 ├── apps/
-│   ├── api/                        # FastAPI backend
-│   │   ├── app/
-│   │   │   ├── core/
-│   │   │   │   └── config.py       # Runtime secret loading (env / Secrets Manager)
-│   │   │   ├── api/v1/endpoints/   # predict · analytics · auth · tenants · reports
-│   │   │   ├── ml/
-│   │   │   │   └── pipeline.py     # Full NLP enrichment pipeline
-│   │   │   ├── models/db.py        # SQLAlchemy async models
-│   │   │   ├── workers/            # Celery tasks + beat scheduler
-│   │   │   └── main.py             # App factory with middleware stack
-│   │   ├── requirements.txt
-│   │   └── Dockerfile
-│   │
-│   └── web/                        # Next.js 15 frontend
-│       ├── src/
-│       │   ├── app/                # App Router pages
-│       │   ├── components/
-│       │   │   ├── charts/         # Recharts visualization components
-│       │   │   └── dashboard/      # KPI cards · Sidebar · TopBar · Simulators
-│       │   └── lib/api.ts          # Axios client with auth interceptors
-│       └── Dockerfile
+│   ├── api/                         FastAPI backend
+│   │   └── app/
+│   │       ├── core/config.py       Runtime secret loading
+│   │       ├── api/v1/endpoints/    predict · analytics · auth · reports
+│   │       ├── ml/pipeline.py       6-layer NLP enrichment engine
+│   │       ├── models/db.py         SQLAlchemy async · tenant isolation
+│   │       └── workers/             Celery tasks · beat scheduler
+│   └── web/                         Next.js 15 dashboard
+│       └── src/
+│           ├── app/                 App Router pages
+│           ├── components/          KPI cards · charts · simulators
+│           └── lib/api.ts           Axios client · auth interceptors
 │
-├── packages/ml/                    # SageMaker ML pipeline scripts
-│   ├── pipeline/                   # data_download.py · data_preprocess.py
-│   ├── training/model_train.py     # Weighted DistilBERT trainer
-│   ├── evaluation/model_eval.py    # Evaluation metrics
-│   └── serving/model_deploy.py    # Endpoint deployment automation
+├── packages/ml/
+│   ├── pipeline/                    data_download · data_preprocess
+│   ├── training/model_train.py      Weighted DistilBERT trainer
+│   ├── evaluation/model_eval.py     Test-set metrics
+│   └── serving/model_deploy.py      Endpoint deployment
 │
-├── infra/
-│   ├── docker/prometheus.yml       # Prometheus scrape config
-│   ├── terraform/                  # (extend with ECS, RDS, ElastiCache)
-│   └── k8s/                        # (extend with Helm charts)
+├── scripts/
+│   └── demo_live_stream.py          ← Start here for demos
 │
 ├── .github/workflows/
-│   ├── 01-ci.yml                   # Lint · type-check · secret scan · Docker build
-│   ├── 02-deploy.yml               # ECS deployment via OIDC (no static keys)
-│   └── 03-ml-train-deploy.yml      # Full SageMaker train → evaluate → deploy
+│   ├── 01-ci.yml                    Lint · test · scan · Docker build
+│   ├── 02-deploy.yml                ECS deploy via OIDC
+│   └── 03-ml-train-deploy.yml       Full SageMaker pipeline
 │
-├── docker-compose.yml              # Full local dev stack (API · Web · PG · Redis · Prometheus)
-├── .env.example                    # Template with placeholders only
-├── .gitignore                      # Excludes .env, secrets, model weights, terraform state
-└── README.md
+├── docker-compose.yml               Full local stack
+└── .env.example                     Configuration template
 ```
+
+<br />
 
 ---
 
-## Secret Management Architecture
+## Secret Management
 
-> **Zero secrets in the repository.** This is a hard architectural constraint, not a best-effort policy.
+Zero secrets in the repository. Enforced by Gitleaks on every CI run.
 
-### How It Works
-
-| Environment | Secret Source | Mechanism |
+| Environment | Source | Mechanism |
 |---|---|---|
-| Local Development | `.env` file on developer machine | `pydantic-settings` reads from `.env` at process start |
-| Staging / Production | AWS Secrets Manager | `config.py` detects `APP_ENV=production` and fetches the secret JSON at startup via IAM role |
-| CI/CD Pipelines | GitHub Actions Secrets + OIDC | No static keys — the deploy workflow assumes an IAM role via GitHub OIDC |
+| Local | `.env` file | pydantic-settings at process start |
+| Production | AWS Secrets Manager | Fetched at startup via IAM role |
+| CI/CD | GitHub Actions + OIDC | Role assumed — no long-lived keys stored |
 
-### Using Your Existing AWS Credentials
-
-Your existing `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are **not modified** by this platform. You plug them in at runtime only — they never touch the repository.
-
-**Local development:**
-```bash
-cp .env.example .env
-# Open .env and fill in:
-# AWS_ACCESS_KEY_ID=<your-existing-key>
-# AWS_SECRET_ACCESS_KEY=<your-existing-secret>
-# AWS_REGION=ap-south-1
-# SAGEMAKER_ENDPOINT_NAME=customer-sentiment-analysis-mlops-endpoint
-```
-
-**Production (recommended):** Store the keys as a JSON object in AWS Secrets Manager:
-```bash
-aws secretsmanager create-secret \
-  --name sentient/production/secrets \
-  --secret-string '{
-    "AWS_ACCESS_KEY_ID": "YOUR_KEY",
-    "AWS_SECRET_ACCESS_KEY": "YOUR_SECRET",
-    "APP_SECRET_KEY": "...",
-    "JWT_SECRET_KEY": "...",
-    "DATABASE_URL": "..."
-  }' \
-  --region ap-south-1
-```
-Then set `APP_ENV=production` and attach an IAM role with `secretsmanager:GetSecretValue` permission to your ECS task or EC2 instance. The API loads secrets automatically at startup with no keys in environment variables.
-
-**Best path forward:** Migrate to an [IAM Role for SageMaker](https://docs.aws.amazon.com/sagemaker/latest/dg/sagemaker-roles.html) which requires zero long-lived credentials at all.
-
----
-
-## Quick Start
-
-### Prerequisites
-- Docker ≥ 24 and Docker Compose ≥ 2
-- AWS credentials with SageMaker endpoint access (see above)
-- Node.js 20+ (for frontend development only)
-- Python 3.11+ (for local API development only)
-
-### 1 — Clone and configure
-
-```bash
-git clone https://github.com/your-org/sentient-platform.git
-cd sentient-platform
-
-# Create your local secrets file (never committed)
-cp .env.example .env
-```
-
-Edit `.env` with your values. **Minimum required:**
-```env
-AWS_ACCESS_KEY_ID=<your-existing-key>
-AWS_SECRET_ACCESS_KEY=<your-existing-secret>
-AWS_REGION=ap-south-1
-SAGEMAKER_ENDPOINT_NAME=customer-sentiment-analysis-mlops-endpoint
-APP_SECRET_KEY=$(openssl rand -hex 32)
-JWT_SECRET_KEY=$(openssl rand -hex 32)
-```
-
-### 2 — Start the full stack
-
-```bash
-docker compose up --build
-```
-
-| Service | URL |
-|---|---|
-| Dashboard | http://localhost:3000 |
-| API (FastAPI) | http://localhost:8000 |
-| API Docs (Swagger) | http://localhost:8000/docs |
-| Prometheus | http://localhost:9090 |
-| PostgreSQL | localhost:5432 |
-
-### 3 — Run your first prediction
-
-```bash
-curl -X POST http://localhost:8000/api/v1/predict \
-  -H "Content-Type: application/json" \
-  -d '{"text": "The onboarding experience is incredibly smooth, loved it!"}'
-```
-
-**Response includes:**
-```json
-{
-  "sentiment": "positive",
-  "sentiment_score": 0.8421,
-  "confidence": 0.9312,
-  "urgency": "low",
-  "urgency_score": 0.12,
-  "severity_score": 0.08,
-  "business_impact_score": 0.14,
-  "attributes": ["onboarding"],
-  "attribute_scores": { "onboarding": 0.67 },
-  "explanation": {
-    "sentiment_label": "positive",
-    "top_tokens": [
-      { "token": "smooth", "importance": 0.31 },
-      { "token": "loved", "importance": 0.28 }
-    ]
-  }
-}
-```
-
----
-
-## ML Pipeline — Train a New Model
-
-The ML training pipeline is fully automated via GitHub Actions.
-
-### Trigger a training run
-
-1. Navigate to **Actions → ML — Train & Deploy SageMaker Model**
-2. Click **Run workflow**, set epochs and batch size
-3. The pipeline will:
-   - Download the Twitter Airline Sentiment dataset from Kaggle → S3
-   - Preprocess and split into train/val/test
-   - Launch a `ml.g4dn.xlarge` GPU training job on SageMaker
-   - Train a weighted DistilBERT classifier with balanced class weights
-   - Evaluate on held-out test set (accuracy, F1, precision, recall)
-   - Package with custom inference handler and deploy to your endpoint
-
-### GitHub Secrets required for ML pipeline
-
-| Secret | Value |
-|---|---|
-| `AWS_ROLE_ARN` | IAM role ARN for GitHub OIDC (no static key needed) |
-| `SAGEMAKER_ROLE_ARN` | SageMaker execution role ARN |
-| `KAGGLE_USERNAME` | Your Kaggle username |
-| `KAGGLE_KEY` | Your Kaggle API key |
-
-### GitHub Variables required
-
-| Variable | Example |
-|---|---|
-| `AWS_REGION` | `ap-south-1` |
-| `S3_BUCKET` | `your-sentient-bucket` |
-| `PROJECT_NAME` | `customer-sentiment-analysis-mlops` |
-| `SAGEMAKER_ENDPOINT_NAME` | `customer-sentiment-analysis-mlops-endpoint` |
-
----
-
-## CI/CD
-
-All workflows use **GitHub OIDC for AWS authentication** — no long-lived IAM user keys are stored in GitHub Secrets for infrastructure operations.
-
-| Workflow | Trigger | What it does |
-|---|---|---|
-| `01-ci.yml` | Push / PR | Secret scan (Gitleaks) · Python lint/test · Frontend build · Docker build |
-| `02-deploy.yml` | Push to `main` | Builds ECR images · Deploys to ECS via OIDC |
-| `03-ml-train-deploy.yml` | Manual | Full SageMaker train → deploy pipeline |
-
----
-
-## API Reference
-
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/api/v1/predict` | Single text sentiment analysis |
-| `POST` | `/api/v1/predict/batch` | Batch analysis (up to 500 texts) |
-| `POST` | `/api/v1/predict/csv` | CSV file upload analysis (up to 10k rows) |
-| `GET` | `/api/v1/analytics/overview` | Executive KPI summary |
-| `GET` | `/api/v1/analytics/timeseries` | Sentiment trend time-series |
-| `GET` | `/api/v1/analytics/attributes` | Attribute heatmap data |
-| `GET` | `/api/v1/analytics/urgency` | Urgency trend breakdown |
-| `GET` | `/api/v1/analytics/drift` | Model drift PSI/KS history |
-| `GET` | `/api/v1/analytics/clusters` | Root-cause cluster insights |
-| `GET` | `/api/v1/analytics/business-impact` | Scenario simulation |
-| `POST` | `/api/v1/auth/login` | JWT token pair |
-| `GET` | `/api/v1/health` | Deep health check |
-| `GET` | `/health` | Liveness probe |
-
-Full interactive documentation: `http://localhost:8000/docs`
+<br />
 
 ---
 
 ## Observability
 
-Sentient ships with a complete observability stack:
+| Signal | Implementation |
+|---|---|
+| Metrics | Prometheus · `/metrics` · 15s scrape |
+| Logging | Structured JSON · automatic credential redaction |
+| Errors | Sentry · environment-tagged |
+| Health | `/health` liveness · `/api/v1/health` deep check |
+| Latency | `X-Process-Time-Ms` response header |
 
-- **Prometheus** — metrics endpoint at `/metrics`, scraped every 15 seconds
-- **Structured logging** — JSON-formatted with automatic credential redaction
-- **Sentry** — exception tracking with environment tagging (set `SENTRY_DSN`)
-- **Health checks** — liveness at `/health`, deep check at `/api/v1/health` (includes SageMaker endpoint status)
-- **Request timing** — `X-Process-Time-Ms` header on every response
-- **Celery** — task monitoring via Flower (add `flower` service to `docker-compose.yml`)
+<br />
 
 ---
 
@@ -344,52 +462,46 @@ Sentient ships with a complete observability stack:
 | Layer | Technology |
 |---|---|
 | ML Training | PyTorch · HuggingFace Transformers · DistilBERT |
-| ML Serving | AWS SageMaker (managed endpoints) |
+| ML Serving | AWS SageMaker managed endpoints |
 | Backend | FastAPI · SQLAlchemy async · Alembic · Celery |
 | Database | PostgreSQL 16 |
 | Cache / Queue | Redis 7 |
 | Frontend | Next.js 15 · React 19 · TypeScript · Tailwind CSS |
-| Charts | Recharts |
-| Auth | JWT (python-jose) · bcrypt |
-| Cloud | AWS (SageMaker · S3 · ECR · ECS · Secrets Manager) |
-| Observability | Prometheus · Sentry · Structured logging |
+| Visualisation | Recharts |
+| Auth | JWT · bcrypt |
+| Cloud | AWS — SageMaker · S3 · ECR · ECS · Secrets Manager |
 | CI/CD | GitHub Actions · Docker · AWS OIDC |
 
----
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/your-feature`
-3. Ensure `docker compose up` starts cleanly with a valid `.env`
-4. Run CI locally: `ruff check apps/api/ && cd apps/web && npm run build`
-5. Confirm no secrets are present: `git diff --staged | grep -E "AKIA|password"`
-6. Open a pull request against `develop`
+<br />
 
 ---
 
-## Security
+## Cost Reference
 
-Sentient was designed with security as a first-class architectural principle:
+| Resource | Approximate Cost |
+|---|---|
+| `ml.g4dn.xlarge` training job | ~$0.70–1.00/hour (billed per second) |
+| `ml.m5.large` inference endpoint | ~$0.115/hour (~$83/month) |
+| `docker compose up` locally | $0 |
 
-- **No secrets in source** — enforced by Gitleaks in every CI run
-- **Runtime-only secret loading** — credentials read from Secrets Manager or `.env`, never baked into images
-- **Non-root Docker containers** — API and web run as unprivileged users
-- **HTTPS-only in production** — enforce via ALB/CloudFront TLS termination
-- **RBAC** — every tenant operation validates the caller's role
-- **Rate limiting** — per-IP at the API gateway layer
-- **Redacting log filter** — strips credential patterns from all log output
+Delete the endpoint between sessions to avoid idle charges:
 
-To report a security vulnerability, email security@your-org.com.
+```bash
+aws sagemaker delete-endpoint \
+  --endpoint-name customer-sentiment-analysis-mlops-endpoint \
+  --region ap-south-1
+```
 
----
+Redeploy anytime via **Actions → ML — Train & Deploy SageMaker Model**.
 
-## License
-
-MIT © Sentient Intelligence Platform Contributors
+<br />
 
 ---
 
 <div align="center">
-<sub>Built with precision. Deployed with confidence. Trusted at scale.</sub>
+
+MIT License · © Sentient Intelligence Platform
+
+*Built with precision. Deployed with confidence.*
+
 </div>
