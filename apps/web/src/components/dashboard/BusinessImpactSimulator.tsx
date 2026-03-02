@@ -8,14 +8,20 @@ export function BusinessImpactSimulator() {
   const [criticalPct, setCriticalPct] = useState(0.5);
   const [highPct, setHighPct] = useState(0.3);
 
-  const { data, isFetching } = useQuery({
+  interface ImpactData {
+    baseline_health_score: number;
+    simulated_health_score: number;
+    improvement: number;
+  }
+
+  const { data, isFetching } = useQuery<ImpactData>({
     queryKey: ["impact", criticalPct, highPct],
     queryFn: () =>
       api
         .get(`/analytics/business-impact?resolve_critical_pct=${criticalPct}&resolve_high_pct=${highPct}`)
         .then((r) => r.data),
     keepPreviousData: true,
-  } as any);
+  });
 
   const baseline = data?.baseline_health_score ?? 62.5;
   const simulated = data?.simulated_health_score ?? baseline;
