@@ -1,0 +1,205 @@
+name: ML — Train & Deploy SageMaker Model
+
+on:
+  workflow_dispatch:
+    inputs:
+      epochs:
+        description: "Training epochs"
+        required: false
+        default: "10"
+      batch_size:
+        description: "Batch size"
+        required: false
+        default: "32"
+      deploy_after_train:
+        description: "Deploy to endpoint after training?"
+        required: false
+        default: "true"
+        type: boolean
+
+jobs:
+  preprocess:
+    name: Data Preprocessing
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install boto3 pandas scikit-learn kagglehub
+      - name: Download dataset from Kaggle and upload to S3
+        run: |
+          python packages/ml/pipeline/data_download.py \
+            --bucket ${{ secrets.S3_BUCKET }} \
+            --project ${{ secrets.PROJECT_NAME }} \
+            --region ${{ secrets.AWS_REGION }}
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+      - name: Preprocess and split data
+        run: |
+          python packages/ml/pipeline/data_preprocess.py \
+            --bucket ${{ secrets.S3_BUCKET }} \
+            --project ${{ secrets.PROJECT_NAME }} \
+            --region ${{ secrets.AWS_REGION }}
+
+  train:
+    name: SageMaker Training
+    runs-on: ubuntu-latest
+    needs: preprocess
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
+    outputs:
+      job_name: ${{ steps.launch.outputs.job_name }}
+      model_uri: ${{ steps.artifacts.outputs.model_uri }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install boto3 sagemaker
+      - name: Package training code and upload to S3
+        run: |
+          cp packages/ml/training/model_train.py model_train.py
+          printf "torch==2.3.1\ntransformers==4.44.2\nscikit-learn==1.5.1\npandas==2.2.2\n" > requirements.txt
+          tar -czf sourcedir.tar.gz model_train.py requirements.txt
+          aws s3 cp sourcedir.tar.gz s3://${{ secrets.S3_BUCKET }}/${{ secrets.PROJECT_NAME }}/code/sourcedir.tar.gz
+      - name: Launch SageMaker training job
+        id: launch
+        run: |
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          JOB_NAME="${{ secrets.PROJECT_NAME }}-train-${TIMESTAMP}"
+          echo "job_name=${JOB_NAME}" >> $GITHUB_OUTPUT
+
+          python3 - << PYEOF
+          import boto3
+          sm = boto3.client('sagemaker', region_name='${{ secrets.AWS_REGION }}')
+          sm.create_training_job(
+            TrainingJobName='${JOB_NAME}',
+            RoleArn='${{ secrets.SAGEMAKER_ROLE_ARN }}',
+            AlgorithmSpecification={
+              'TrainingImage': '763104351884.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/pytorch-training:2.3.0-gpu-py311-cu121-ubuntu20.04-sagemaker-v1.0',
+              'TrainingInputMode': 'File',
+            },
+            InputDataConfig=[{
+              'ChannelName': 'training',
+              'DataSource': {'S3DataSource': {
+                'S3DataType': 'S3Prefix',
+                'S3Uri': 's3://${{ secrets.S3_BUCKET }}/${{ secrets.PROJECT_NAME }}/data/processed/',
+              }},
+            }],
+            OutputDataConfig={
+              'S3OutputPath': 's3://${{ secrets.S3_BUCKET }}/${{ secrets.PROJECT_NAME }}/models/',
+            },
+            ResourceConfig={
+              'InstanceType': 'ml.g4dn.xlarge',
+              'InstanceCount': 1,
+              'VolumeSizeInGB': 30,
+            },
+            StoppingCondition={'MaxRuntimeInSeconds': 3600},
+            HyperParameters={
+              'bucket': '${{ secrets.S3_BUCKET }}',
+              'project': '${{ secrets.PROJECT_NAME }}',
+              'region': '${{ secrets.AWS_REGION }}',
+              'epochs': '${{ github.event.inputs.epochs }}',
+              'batch-size': '${{ github.event.inputs.batch_size }}',
+              'sagemaker_program': 'model_train.py',
+              'sagemaker_submit_directory': 's3://${{ secrets.S3_BUCKET }}/${{ secrets.PROJECT_NAME }}/code/sourcedir.tar.gz',
+            },
+          )
+          print('Job launched: ${JOB_NAME}')
+          PYEOF
+
+      - name: Wait for training to complete
+        run: |
+          python3 - << 'PYEOF'
+          import boto3, time
+          sm = boto3.client('sagemaker', region_name='${{ secrets.AWS_REGION }}')
+          job = '${{ steps.launch.outputs.job_name }}'
+          print(f'Monitoring: {job}')
+          while True:
+            resp = sm.describe_training_job(TrainingJobName=job)
+            status = resp['TrainingJobStatus']
+            print(f'  {status}')
+            if status == 'Completed':
+              break
+            if status in ('Failed', 'Stopped'):
+              raise RuntimeError(f"Training {status}: {resp.get('FailureReason', '')}")
+            time.sleep(30)
+          PYEOF
+
+      - name: Get model artifact URI
+        id: artifacts
+        run: |
+          URI=$(aws sagemaker describe-training-job \
+            --training-job-name ${{ steps.launch.outputs.job_name }} \
+            --query 'ModelArtifacts.S3ModelArtifacts' \
+            --output text)
+          echo "model_uri=${URI}" >> $GITHUB_OUTPUT
+          echo "Model saved at: ${URI}"
+
+  evaluate:
+    name: Evaluate Model
+    runs-on: ubuntu-latest
+    needs: train
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install boto3 torch transformers scikit-learn pandas matplotlib seaborn
+      - name: Run evaluation
+        run: |
+          python packages/ml/evaluation/model_eval.py \
+            --bucket ${{ secrets.S3_BUCKET }} \
+            --project ${{ secrets.PROJECT_NAME }} \
+            --region ${{ secrets.AWS_REGION }} \
+            --output-path ./eval-results
+      - name: Upload evaluation artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: evaluation-results
+          path: eval-results/
+
+  deploy:
+    name: Deploy to SageMaker Endpoint
+    runs-on: ubuntu-latest
+    needs: [train, evaluate]
+    if: ${{ github.event.inputs.deploy_after_train == 'true' }}
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install boto3
+      - name: Deploy model to endpoint
+        run: |
+          python packages/ml/serving/model_deploy.py \
+            --bucket ${{ secrets.S3_BUCKET }} \
+            --project ${{ secrets.PROJECT_NAME }} \
+            --endpoint ${{ secrets.SAGEMAKER_ENDPOINT_NAME }} \
+            --role ${{ secrets.SAGEMAKER_ROLE_ARN }} \
+            --region ${{ secrets.AWS_REGION }}
+      - name: Summary
+        run: |
+          echo "## ML Pipeline Complete" >> $GITHUB_STEP_SUMMARY
+          echo "- Model: ${{ needs.train.outputs.model_uri }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Endpoint: ${{ secrets.SAGEMAKER_ENDPOINT_NAME }}" >> $GITHUB_STEP_SUMMARY
