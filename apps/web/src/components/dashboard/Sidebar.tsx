@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, BarChart2, FileText, Network,
-  Settings, Zap, Activity, ChevronRight,
+  Settings, Zap, Activity, ChevronRight, FlaskConical,
 } from "lucide-react";
 import { clsx } from "clsx";
 
@@ -13,6 +13,7 @@ const NAV = [
   { href: "/analytics", label: "Analytics", icon: BarChart2 },
   { href: "/clusters", label: "Clusters", icon: Network },
   { href: "/reports", label: "Reports", icon: FileText },
+  { href: "/demo", label: "Live Demo", icon: FlaskConical },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
