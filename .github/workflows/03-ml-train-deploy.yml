@@ -1,0 +1,164 @@
+name: ML — Train & Deploy SageMaker Model
+
+on:
+  workflow_dispatch:
+    inputs:
+      epochs:
+        description: Training epochs
+        required: false
+        default: "10"
+      batch_size:
+        description: Batch size
+        required: false
+        default: "32"
+      deploy_after_train:
+        description: Deploy to endpoint after training?
+        required: false
+        default: "true"
+        type: boolean
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  S3_BUCKET: ${{ vars.S3_BUCKET }}
+  PROJECT_NAME: ${{ vars.PROJECT_NAME }}
+
+jobs:
+  preprocess:
+    name: Data Preprocessing
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install boto3 pandas scikit-learn kagglehub
+
+      - name: Configure AWS (OIDC — no static keys)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download & preprocess
+        run: python packages/ml/pipeline/data_preprocess.py --bucket ${{ env.S3_BUCKET }} --project ${{ env.PROJECT_NAME }} --region ${{ env.AWS_REGION }}
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+
+  train:
+    name: SageMaker Training
+    runs-on: ubuntu-latest
+    needs: preprocess
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      job-name: ${{ steps.start.outputs.job_name }}
+      model-uri: ${{ steps.artifacts.outputs.model_uri }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install boto3 sagemaker
+
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Package training code
+        run: |
+          cp packages/ml/training/model_train.py model_train.py
+          echo "torch==2.3.1\ntransformers==4.44.2\nscikit-learn==1.5.1\npandas==2.2.2" > requirements.txt
+          tar -czf sourcedir.tar.gz model_train.py requirements.txt
+          aws s3 cp sourcedir.tar.gz s3://${{ env.S3_BUCKET }}/${{ env.PROJECT_NAME }}/code/sourcedir.tar.gz
+
+      - name: Launch SageMaker training job
+        id: start
+        run: |
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          JOB_NAME="${{ env.PROJECT_NAME }}-train-${TIMESTAMP}"
+          python - <<EOF
+          import boto3, os
+          sm = boto3.client('sagemaker', region_name='${{ env.AWS_REGION }}')
+          sm.create_training_job(
+            TrainingJobName='${JOB_NAME}',
+            RoleArn='${{ secrets.SAGEMAKER_ROLE_ARN }}',
+            AlgorithmSpecification={
+              'TrainingImage': '763104351884.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/pytorch-training:2.3.0-gpu-py311-cu121-ubuntu20.04-sagemaker-v1.0',
+              'TrainingInputMode': 'File'
+            },
+            InputDataConfig=[{'ChannelName': 'training', 'DataSource': {'S3DataSource': {'S3DataType': 'S3Prefix', 'S3Uri': 's3://${{ env.S3_BUCKET }}/${{ env.PROJECT_NAME }}/data/processed/'}}}],
+            OutputDataConfig={'S3OutputPath': 's3://${{ env.S3_BUCKET }}/${{ env.PROJECT_NAME }}/models/'},
+            ResourceConfig={'InstanceType': 'ml.g4dn.xlarge', 'InstanceCount': 1, 'VolumeSizeInGB': 30},
+            StoppingCondition={'MaxRuntimeInSeconds': 3600},
+            HyperParameters={
+              'bucket': '${{ env.S3_BUCKET }}',
+              'project': '${{ env.PROJECT_NAME }}',
+              'region': '${{ env.AWS_REGION }}',
+              'epochs': '${{ github.event.inputs.epochs }}',
+              'batch-size': '${{ github.event.inputs.batch_size }}',
+              'sagemaker_program': 'model_train.py',
+              'sagemaker_submit_directory': 's3://${{ env.S3_BUCKET }}/${{ env.PROJECT_NAME }}/code/sourcedir.tar.gz'
+            }
+          )
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+            f.write(f'job_name=${JOB_NAME}\n')
+          EOF
+
+      - name: Wait for training completion
+        run: |
+          python - <<'EOF'
+          import boto3, time
+          sm = boto3.client('sagemaker', region_name='${{ env.AWS_REGION }}')
+          job = '${{ steps.start.outputs.job_name }}'
+          while True:
+            status = sm.describe_training_job(TrainingJobName=job)['TrainingJobStatus']
+            print(f'Status: {status}')
+            if status == 'Completed': break
+            if status in ('Failed', 'Stopped'): raise RuntimeError(f'Training {status}')
+            time.sleep(30)
+          EOF
+
+      - name: Get model artifacts
+        id: artifacts
+        run: |
+          URI=$(aws sagemaker describe-training-job \
+            --training-job-name ${{ steps.start.outputs.job_name }} \
+            --query 'ModelArtifacts.S3ModelArtifacts' --output text)
+          echo "model_uri=$URI" >> $GITHUB_OUTPUT
+          echo "## Training Complete ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- **Model URI:** $URI" >> $GITHUB_STEP_SUMMARY
+
+  deploy:
+    name: Deploy to SageMaker Endpoint
+    runs-on: ubuntu-latest
+    needs: train
+    if: ${{ github.event.inputs.deploy_after_train == 'true' }}
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install boto3
+
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy model to endpoint
+        run: |
+          python packages/ml/serving/model_deploy.py \
+            --bucket ${{ env.S3_BUCKET }} \
+            --project ${{ env.PROJECT_NAME }} \
+            --endpoint ${{ vars.SAGEMAKER_ENDPOINT_NAME }} \
+            --role ${{ secrets.SAGEMAKER_ROLE_ARN }} \
+            --region ${{ env.AWS_REGION }}
