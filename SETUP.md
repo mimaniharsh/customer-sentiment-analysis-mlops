@@ -30,7 +30,7 @@ git branch -M main
 
 # Add your GitHub repo as origin (replace YOUR_USERNAME)
 git remote add origin https://github.com/YOUR_USERNAME/sentient-platform.git
-git remote add https://github.com/mimaniharsh/customer-sentiment-analysis-mlops.git
+
 # Stage and commit everything
 git add .
 git commit -m "feat: initial commit — Sentient Intelligence Platform v2"
