@@ -55,8 +55,7 @@ const STATUS_STYLE = {
   warn:    { text: "text-amber-400",   bg: "bg-amber-500/10",   border: "border-amber-500/20" },
 };
 
-function KPIChip({ label, value, unit = "", status = "neutral" }) {
-  const s = STATUS_STYLE[status] || STATUS_STYLE.neutral;
+function KPIChip({ label, value, unit = "", status = "neutral" }: { label: string; value: number | string; unit?: string; status?: string }) {  const s = STATUS_STYLE[status] || STATUS_STYLE.neutral;
   return (
     <div className={`flex items-center justify-between px-3 py-2 rounded-lg border ${s.bg} ${s.border}`}>
       <span className="text-xs text-slate-500">{label}</span>
