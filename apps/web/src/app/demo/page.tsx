@@ -35,13 +35,13 @@ const TWEETS = [
   "Baggage carousel took 70 minutes. Why even have priority tags at this point?",
 ];
 
-const SENTIMENT_CONFIG = {
+const SENTIMENT_CONFIG: Record<string, any> = {
   positive: { label: "Positive", textColor: "text-emerald-400", bg: "bg-emerald-500/8", border: "border-emerald-500/20", barColor: "bg-emerald-500", Icon: CheckCircle },
   neutral:  { label: "Neutral",  textColor: "text-slate-400",   bg: "bg-slate-500/8",   border: "border-slate-600/30",  barColor: "bg-slate-500",   Icon: Minus },
   negative: { label: "Negative", textColor: "text-red-400",     bg: "bg-red-500/8",     border: "border-red-500/20",    barColor: "bg-red-500",     Icon: AlertTriangle },
 };
 
-const RISK_CONFIG = {
+const RISK_CONFIG: Record<string, any> = {
   CRITICAL: { text: "text-red-300",     bg: "bg-red-950/60",     border: "border-red-500/40",     dot: "bg-red-500" },
   HIGH:     { text: "text-orange-300",  bg: "bg-orange-950/60",  border: "border-orange-500/40",  dot: "bg-orange-500" },
   MEDIUM:   { text: "text-amber-300",   bg: "bg-amber-950/60",   border: "border-amber-500/40",   dot: "bg-amber-500" },
@@ -56,7 +56,7 @@ function GaugeBar({ value, color }: { value: number; color: string }) {
   );
 }
 
-function SentimentDistBar({ pos, neu, neg }) {
+function SentimentDistBar({ pos, neu, neg }: { pos: number; neu: number; neg: number }) {
   return (
     <div className="flex h-2 w-full rounded-full overflow-hidden gap-px">
       <div className="bg-emerald-500 transition-all duration-700" style={{ width: `${pos * 100}%` }} />
@@ -66,7 +66,7 @@ function SentimentDistBar({ pos, neu, neg }) {
   );
 }
 
-function MetricPill({ label, value, sub = null }) {
+function MetricPill({ label, value, sub = null }: { label: string; value: string | number; sub?: string | null }) {
   return (
     <div className="flex flex-col items-center justify-center bg-slate-900/70 border border-slate-700/40 rounded-lg px-3 py-2.5 text-center min-w-[80px]">
       <p className="text-xs text-slate-500 mb-1 whitespace-nowrap">{label}</p>
@@ -76,7 +76,7 @@ function MetricPill({ label, value, sub = null }) {
   );
 }
 
-function SarcasmMeter({ value }) {
+function SarcasmMeter({ value }: { value: number }) {
   const pct = Math.round(value * 100);
   const color    = value >= 0.6 ? "text-violet-400" : value >= 0.35 ? "text-amber-400" : "text-slate-500";
   const barColor = value >= 0.6 ? "bg-violet-500"   : value >= 0.35 ? "bg-amber-400"   : "bg-slate-600";
@@ -97,7 +97,7 @@ function SarcasmMeter({ value }) {
   );
 }
 
-function RiskBadge({ risk }) {
+function RiskBadge({ risk }: { risk: any }) {
   const cfg = RISK_CONFIG[risk.tier] || RISK_CONFIG.LOW;
   return (
     <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${cfg.bg} ${cfg.border}`}>
@@ -108,7 +108,7 @@ function RiskBadge({ risk }) {
   );
 }
 
-function IntelligenceCard({ r, index, isLatest = false }) {
+function IntelligenceCard({ r, index, isLatest = false }: { r: any; index: number; isLatest?: boolean }) {
   const [expanded, setExpanded] = useState(isLatest);
   const cfg = SENTIMENT_CONFIG[r.sentiment] || SENTIMENT_CONFIG.neutral;
   const Icon = cfg.Icon;
@@ -150,7 +150,7 @@ function IntelligenceCard({ r, index, isLatest = false }) {
         <MetricPill label="Urgency Score"   value={r.urgency_score?.toFixed(2)} sub="/1.00" />
         {r.attributes?.length > 0 && (
           <div className="flex items-center gap-1.5 flex-wrap">
-            {r.attributes.slice(0, 4).map(a => (
+            {r.attributes.slice(0, 4).map((a: any) => (
               <span key={a} className="px-2 py-1.5 text-xs text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 rounded-lg">{a}</span>
             ))}
           </div>
@@ -201,7 +201,7 @@ function IntelligenceCard({ r, index, isLatest = false }) {
             <div>
               <p className="text-xs text-slate-700 mb-2 uppercase tracking-wider">Key Tokens</p>
               <div className="flex flex-wrap gap-1.5">
-                {tokens.map((t, i) => (
+                {tokens.map((t: any, i: number) => (
                   <span key={i} className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-800 border border-slate-700/50 text-xs font-mono text-slate-400">
                     {t.token}<span className="text-slate-600">{(t.importance * 100).toFixed(0)}%</span>
                   </span>
@@ -215,7 +215,7 @@ function IntelligenceCard({ r, index, isLatest = false }) {
   );
 }
 
-function TabBtn({ active, onClick, icon: Icon, label, sub }) {
+function TabBtn({ active, onClick, icon: Icon, label, sub }: { active: boolean; onClick: () => void; icon: any; label: string; sub: string }) {
   return (
     <button onClick={onClick}
       className={`flex items-center gap-3 px-4 py-3.5 rounded-xl border text-left transition-all w-full ${active
@@ -232,27 +232,27 @@ function TabBtn({ active, onClick, icon: Icon, label, sub }) {
 
 export default function DemoPage() {
   const [tab, setTab] = useState("stream");
-  const [apiOnline, setApiOnline] = useState(null);
+  const [apiOnline, setApiOnline] = useState<boolean | null>(null);
   const [streaming, setStreaming]   = useState(false);
-  const [feed, setFeed]             = useState([]);
+  const [feed, setFeed]             = useState<any[]>([]);
   const [stats, setStats]           = useState({ pos: 0, neu: 0, neg: 0, crit: 0 });
   const [speed, setSpeed]           = useState(2200);
-  const streamRef                   = useRef(null);
+  const streamRef                   = useRef<NodeJS.Timeout | null>(null);
   const tweetIdx                    = useRef(0);
   const keyRef                      = useRef(0);
   const [text, setText]             = useState("");
   const [singleLoading, setSL]      = useState(false);
-  const [singleResult, setSR]       = useState(null);
+  const [singleResult, setSR]       = useState<any>(null);
   const [singleError, setSE]        = useState("");
   const [batchText, setBT]          = useState("");
   const [batchLoading, setBL]       = useState(false);
-  const [batchResults, setBR]       = useState([]);
-  const [batchSummary, setBS]       = useState(null);
+  const [batchResults, setBR]       = useState<any[]>([]);
+  const [batchSummary, setBS]       = useState<any>(null);
   const [batchError, setBE]         = useState("");
-  const [csvFile, setCsvFile]       = useState(null);
+  const [csvFile, setCsvFile]       = useState<File | null>(null);
   const [csvLoading, setCL]         = useState(false);
   const [csvError, setCE]           = useState("");
-  const fileRef                     = useRef(null);
+  const fileRef                     = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const check = async () => {
@@ -290,7 +290,7 @@ export default function DemoPage() {
     if (!text.trim() || singleLoading) return;
     setSL(true); setSE(""); setSR(null);
     try { const { data } = await axios.post(`${API}/predict`, { text: text.trim(), source: "demo" }); setSR(data); }
-    catch (e) { setSE(e.response?.data?.detail || "API unavailable — is the platform running?"); }
+    catch (e: any) { setSE(e.response?.data?.detail || "API unavailable — is the platform running?"); }
     finally { setSL(false); }
   };
 
@@ -299,7 +299,7 @@ export default function DemoPage() {
     if (!lines.length || batchLoading) return;
     setBL(true); setBE(""); setBR([]); setBS(null);
     try { const { data } = await axios.post(`${API}/predict/batch`, { texts: lines, source: "demo" }); setBR(data.predictions || []); setBS(data.summary || null); }
-    catch (e) { setBE(e.response?.data?.detail || "Batch failed."); }
+    catch (e: any) { setBE(e.response?.data?.detail || "Batch failed."); }
     finally { setBL(false); }
   };
 
@@ -308,7 +308,7 @@ export default function DemoPage() {
     setCL(true); setCE(""); setBR([]); setBS(null);
     const form = new FormData(); form.append("file", csvFile);
     try { const { data } = await axios.post(`${API}/predict/csv`, form, { headers: { "Content-Type": "multipart/form-data" }, timeout: 300000 }); setBR(data.predictions || []); setBS(data.summary || null); }
-    catch (e) { setCE(e.response?.data?.detail || "Upload failed."); }
+    catch (e: any) { setCE(e.response?.data?.detail || "Upload failed."); }
     finally { setCL(false); }
   };
 
