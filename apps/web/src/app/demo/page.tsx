@@ -48,7 +48,7 @@ const RISK_CONFIG = {
   LOW:      { text: "text-emerald-400", bg: "bg-emerald-950/40", border: "border-emerald-500/30", dot: "bg-emerald-500" },
 };
 
-function GaugeBar({ value, color }) {
+function GaugeBar({ value, color }: { value: number; color: string }) {
   return (
     <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
       <div className={`h-full rounded-full transition-all duration-700 ${color}`} style={{ width: `${Math.min(value * 100, 100).toFixed(1)}%` }} />
