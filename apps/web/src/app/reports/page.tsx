@@ -48,14 +48,16 @@ const REPORT_TYPES = [
   },
 ];
 
-const STATUS_STYLE = {
+// Added Record<string, any> here to fix the index signature error
+const STATUS_STYLE: Record<string, any> = {
   good:    { text: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20" },
   neutral: { text: "text-slate-400",   bg: "bg-slate-700/30",   border: "border-slate-600/20" },
   risk:    { text: "text-red-400",     bg: "bg-red-500/10",     border: "border-red-500/20" },
   warn:    { text: "text-amber-400",   bg: "bg-amber-500/10",   border: "border-amber-500/20" },
 };
 
-function KPIChip({ label, value, unit = "", status = "neutral" }: { label: string; value: number | string; unit?: string; status?: string }) {  const s = STATUS_STYLE[status] || STATUS_STYLE.neutral;
+function KPIChip({ label, value, unit = "", status = "neutral" }: { label: string; value: number | string; unit?: string; status?: string }) {  
+  const s = STATUS_STYLE[status] || STATUS_STYLE.neutral;
   return (
     <div className={`flex items-center justify-between px-3 py-2 rounded-lg border ${s.bg} ${s.border}`}>
       <span className="text-xs text-slate-500">{label}</span>
@@ -64,7 +66,8 @@ function KPIChip({ label, value, unit = "", status = "neutral" }: { label: strin
   );
 }
 
-function ReportSection({ section }) {
+// Added explicit : { section: any } type
+function ReportSection({ section }: { section: any }) {
   const [open, setOpen] = useState(true);
   return (
     <div className="border border-slate-800 rounded-xl overflow-hidden">
@@ -77,14 +80,14 @@ function ReportSection({ section }) {
         <div className="px-4 pb-4 space-y-3 pt-3">
           {section.kpis && (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {section.kpis.map(kpi => (
+              {section.kpis.map((kpi: any) => (
                 <KPIChip key={kpi.label} label={kpi.label} value={kpi.value} unit={kpi.unit} status={kpi.status} />
               ))}
             </div>
           )}
           {section.attributes && (
             <div className="space-y-2">
-              {section.attributes.map(a => (
+              {section.attributes.map((a: any) => (
                 <div key={a.attribute} className="flex items-center justify-between px-3 py-2 bg-slate-800/30 rounded-lg">
                   <span className="text-sm text-slate-300 capitalize">{a.attribute}</span>
                   <div className="flex items-center gap-3">
@@ -106,9 +109,10 @@ function ReportSection({ section }) {
   );
 }
 
-function RiskReport({ data }) {
+// Added explicit : { data: any } type
+function RiskReport({ data }: { data: any }) {
   if (!data?.tiers) return <p className="text-sm text-slate-500">{data?.note || "No data."}</p>;
-  const TIER_COLOR = { CRITICAL: "text-red-400", HIGH: "text-orange-400", MEDIUM: "text-amber-400", LOW: "text-emerald-400" };
+  const TIER_COLOR: Record<string, string> = { CRITICAL: "text-red-400", HIGH: "text-orange-400", MEDIUM: "text-amber-400", LOW: "text-emerald-400" };
   return (
     <div className="space-y-3">
       {data.insight && (
@@ -127,7 +131,7 @@ function RiskReport({ data }) {
           </div>
         ))}
       </div>
-      {data.tiers.map(t => (
+      {data.tiers.map((t: any) => (
         <div key={t.tier} className="border border-slate-800 rounded-xl p-4">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-3">
@@ -143,13 +147,14 @@ function RiskReport({ data }) {
   );
 }
 
-function ClusterReport({ data }) {
+// Added explicit : { data: any } type
+function ClusterReport({ data }: { data: any }) {
   if (!data?.clusters?.length) return <p className="text-sm text-slate-500">{data?.note || "No data."}</p>;
-  const SENT_COLOR = { negative: "text-red-400", positive: "text-emerald-400", neutral: "text-slate-400" };
+  const SENT_COLOR: Record<string, string> = { negative: "text-red-400", positive: "text-emerald-400", neutral: "text-slate-400" };
   return (
     <div className="space-y-3">
       {data.insight && <div className="bg-slate-800/40 border border-slate-700/30 rounded-lg p-3"><p className="text-sm text-slate-300">{data.insight}</p></div>}
-      {data.clusters.map(c => (
+      {data.clusters.map((c: any) => (
         <div key={c.theme} className="border border-slate-800 rounded-xl p-4">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm font-semibold text-white">{c.theme}</span>
@@ -174,7 +179,8 @@ function ClusterReport({ data }) {
   );
 }
 
-function DriftReport({ data }) {
+// Added explicit : { data: any } type
+function DriftReport({ data }: { data: any }) {
   if (!data?.total_analysed) return <p className="text-sm text-slate-500">{data?.note || "No data."}</p>;
   return (
     <div className="space-y-3">
@@ -206,7 +212,8 @@ function DriftReport({ data }) {
   );
 }
 
-function ReportViewer({ report, onDelete }) {
+// Added explicit : { report: any, onDelete: (id: string) => void } type
+function ReportViewer({ report, onDelete }: { report: any; onDelete: (id: string) => void }) {
   const [open, setOpen] = useState(false);
   const d = report.data;
   const hasNote = !!d?.note;
@@ -243,7 +250,7 @@ function ReportViewer({ report, onDelete }) {
             </div>
           ) : (
             <>
-              {report.type === "executive_summary"  && d.sections?.map((s, i) => <ReportSection key={i} section={s} />)}
+              {report.type === "executive_summary"  && d.sections?.map((s: any, i: number) => <ReportSection key={i} section={s} />)}
               {report.type === "risk_breakdown"      && <RiskReport data={d} />}
               {report.type === "cluster_intelligence" && <ClusterReport data={d} />}
               {report.type === "drift_analysis"      && <DriftReport data={d} />}
@@ -265,12 +272,12 @@ export default function ReportsPage() {
   });
 
   const generate = useMutation({
-    mutationFn: (type) => api.post("/reports", { type }).then(r => r.data),
+    mutationFn: (type: string) => api.post("/reports", { type }).then(r => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["reports"] }),
   });
 
   const remove = useMutation({
-    mutationFn: (id) => api.delete(`/reports/${id}`),
+    mutationFn: (id: string) => api.delete(`/reports/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["reports"] }),
   });
 
@@ -335,7 +342,7 @@ export default function ReportsPage() {
             <p className="text-xs mt-1 opacity-40">Tip: run the Live Stream demo first to populate data</p>
           </div>
         ) : (
-          reports.map(r => (
+          reports.map((r: any) => (
             <ReportViewer key={r.id} report={r} onDelete={(id) => remove.mutate(id)} />
           ))
         )}
