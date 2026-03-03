@@ -1,10 +1,10 @@
 // apps/web/src/lib/api.ts
 import axios from "axios";
 
+// Always use relative URL — Next.js rewrites proxy it to http://api:8000
+// This works in localhost, GitHub Codespaces, and production identically.
 export const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL
-    ? `${process.env.NEXT_PUBLIC_API_URL}/api/v1`
-    : "http://localhost:8000/api/v1",
+  baseURL: "/api/v1",
   timeout: 30_000,
   headers: { "Content-Type": "application/json" },
 });
