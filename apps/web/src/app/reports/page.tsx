@@ -319,7 +319,7 @@ export default function ReportsPage() {
       {generate.isError && (
         <div className="p-3 bg-red-950/40 border border-red-500/25 rounded-xl text-xs text-red-400 flex items-center gap-2">
           <AlertTriangle className="w-4 h-4 shrink-0" />
-          {generate.error?.response?.data?.detail ?? "Failed to generate report — is the API running?"}
+          {(generate.error as any)?.response?.data?.detail ?? "Failed to generate report — is the API running?"}
         </div>
       )}
 
