@@ -1,0 +1,33 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --brand-primary: #6366f1;
+  --brand-secondary: #8b5cf6;
+  --positive: #10b981;
+  --neutral: #f59e0b;
+  --negative: #ef4444;
+  --critical: #dc2626;
+}
+
+@layer base {
+  * { @apply border-slate-800; }
+  body { @apply bg-slate-950 text-slate-100; }
+  ::-webkit-scrollbar { @apply w-1.5 h-1.5; }
+  ::-webkit-scrollbar-track { @apply bg-slate-900; }
+  ::-webkit-scrollbar-thumb { @apply bg-slate-700 rounded-full; }
+}
+
+@layer components {
+  .card {
+    @apply bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl;
+  }
+  .kpi-card {
+    @apply card hover:border-indigo-600/50 transition-colors;
+  }
+  .badge-positive { @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/30; }
+  .badge-neutral  { @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/15 text-amber-400 border border-amber-500/30; }
+  .badge-negative { @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/15 text-red-400 border border-red-500/30; }
+  .badge-critical { @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-700/20 text-red-300 border border-red-600/40; }
+}

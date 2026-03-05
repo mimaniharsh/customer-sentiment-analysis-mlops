@@ -64,41 +64,10 @@ class BatchPredictRequest(BaseModel):
         return [t.strip() for t in v]
 
 
-def _sarcasm_indicator(text: str, result) -> float:
-    """
-    Derives a sarcasm probability from signal mismatch — NOT a dedicated model.
-    High sarcasm probability = model says positive/neutral BUT text contains
-    strong negative urgency cues (contradiction between tone and content).
-    Range 0.0–1.0.
-    """
-    negative_cues = {
-        "worst", "terrible", "awful", "horrible", "disgusting", "pathetic",
-        "useless", "ridiculous", "joke", "thanks for nothing", "great job",
-        "oh sure", "right", "obviously", "clearly", "totally", "absolutely",
-        "fantastic", "wonderful", "brilliant",  # often sarcastic when paired with complaints
-        "love how", "love the way", "love it when", "love that",
-    }
-    lower = text.lower()
-    cue_hits = sum(1 for c in negative_cues if c in lower)
-
-    # Mismatch: sentiment says positive but urgency is high/critical
-    urgency_mismatch = result.sentiment in ("positive", "neutral") and result.urgency in ("high", "critical")
-
-    # Probability based on: cue hits × mismatch signal
-    base = min(cue_hits * 0.18, 0.6)
-    if urgency_mismatch:
-        base += 0.25
-    # Also boost if prob_negative is non-trivial despite positive label
-    if result.sentiment == "positive" and result.prob_negative > 0.15:
-        base += result.prob_negative * 0.3
-
-    return round(min(base, 0.95), 3)
 
 
 def _risk_tier(urgency: str, severity_score: float, business_impact_score: float) -> dict:
-    """
-    Maps urgency + scores to a named risk tier with label and recommended action.
-    """
+    """Maps urgency + scores to a named risk tier with label and recommended action."""
     composite = (severity_score * 0.4 + business_impact_score * 0.6)
     if urgency == "critical" or composite >= 0.75:
         return {
@@ -134,71 +103,100 @@ def _risk_tier(urgency: str, severity_score: float, business_impact_score: float
         }
 
 
-def _strategic_insight(result, sarcasm: float, risk: dict) -> str:
+def _strategic_insight(result, risk: dict) -> str:
     """
-    Generates a concise, BCG-style strategic insight sentence from prediction signals.
-    No hallucination — every clause is grounded in actual model output.
+    BCG-style strategic insight grounded entirely in actual model outputs.
+    Uses multi-head outputs (sarcasm, severity, override_reason) for richer language.
     """
     attrs = result.attributes[:2] if result.attributes else []
     attr_str = " and ".join(attrs) if attrs else "general experience"
+    sarcasm_prob = result.sarcasm.get("probability", 0.0) if result.sarcasm else 0.0
+    was_overridden = "Overridden" in result.sentiment_override_reason
 
     if result.sentiment == "negative":
+        if was_overridden:
+            return (
+                f"Sarcasm-adjusted classification: originally appeared {result.sarcasm.get('signals', [''])[0].split(':')[0] if result.sarcasm.get('signals') else 'ambiguous'}, "
+                f"re-classified negative after {sarcasm_prob:.0%} sarcasm probability. "
+                f"Human review recommended — ironic dissatisfaction often precedes churn."
+            )
         if risk["level"] >= 3:
+            sev_label = result.severity.get("label", "High") if result.severity else "High"
             return (
-                f"This signal represents a high-severity {attr_str} failure with "
-                f"{result.business_impact_score:.0%} business impact. "
-                f"Unresolved, this class of feedback erodes NPS and accelerates churn."
-            )
-        else:
-            return (
-                f"Negative sentiment detected across {attr_str}. "
-                f"Pattern resolution at this urgency level typically yields a 5–8pt NPS uplift."
-            )
-    elif result.sentiment == "positive":
-        if sarcasm > 0.45:
-            return (
-                f"Positive label with elevated sarcasm signal ({sarcasm:.0%}). "
-                f"Recommend human review — underlying dissatisfaction may be masked by ironic phrasing."
+                f"{sev_label}-severity {attr_str} failure detected. "
+                f"Business impact score {result.business_impact_score:.0%}. "
+                f"Unresolved signals in this tier statistically correlate with elevated churn risk."
             )
         return (
-            f"Genuine positive signal on {attr_str} — "
-            f"high-confidence ({result.confidence:.0%}) advocate behaviour. "
+            f"Negative signal on {attr_str}. "
+            f"Pattern resolution at this urgency level typically yields a 5–8pt NPS uplift."
+        )
+    elif result.sentiment == "positive":
+        if sarcasm_prob >= 0.30:
+            return (
+                f"Positive label with {sarcasm_prob:.0%} sarcasm probability — treat with caution. "
+                f"Recommend human review before routing to advocate programmes."
+            )
+        return (
+            f"Genuine positive signal on {attr_str}. "
+            f"High-confidence ({result.confidence:.0%}) advocate behaviour. "
             f"Candidate for referral and case-study capture."
         )
     else:
         return (
-            f"Neutral signal with {result.confidence:.0%} confidence. "
-            f"Borderline cases at this score benefit from follow-up outreach to resolve latent friction."
+            f"Neutral signal ({result.confidence:.0%} confidence). "
+            f"Borderline cases benefit from follow-up outreach to resolve latent friction."
         )
 
 
 def _format_result(result, text: str, idx: int = 0) -> dict:
-    sarcasm = _sarcasm_indicator(text, result)
     risk = _risk_tier(result.urgency, result.severity_score, result.business_impact_score)
-    insight = _strategic_insight(result, sarcasm, risk)
+    insight = _strategic_insight(result, risk)
+    sarcasm = result.sarcasm or {}
+    severity = result.severity or {}
     return {
         "id": idx,
         "text": text,
+        # ── Sentiment head ──────────────────────────────────────────────────
         "sentiment": result.sentiment,
         "sentiment_score": result.sentiment_score,
+        "sentiment_override_reason": result.sentiment_override_reason,
         "confidence": result.confidence,
         "probabilities": {
             "positive": result.prob_positive,
-            "neutral": result.prob_neutral,
+            "neutral":  result.prob_neutral,
             "negative": result.prob_negative,
         },
-        "urgency": result.urgency,
-        "urgency_score": result.urgency_score,
-        "severity_score": result.severity_score,
+        # ── Sarcasm head ────────────────────────────────────────────────────
+        "sarcasm_probability": sarcasm.get("probability", 0.0),
+        "sarcasm_label":       sarcasm.get("label", "Literal tone"),
+        "sarcasm_signals":     sarcasm.get("signals", []),
+        "sarcasm_explanation": sarcasm.get("explanation", ""),
+        # ── Severity head ───────────────────────────────────────────────────
+        "severity_score":      result.severity_score,
+        "severity_tier":       severity.get("tier", "low"),
+        "severity_label":      severity.get("label", "Low"),
+        "severity_criteria":   severity.get("matched_criteria", []),
+        "severity_keywords":   severity.get("matched_keywords", []),
+        "severity_explanation":severity.get("explanation", ""),
+        # ── Urgency ─────────────────────────────────────────────────────────
+        "urgency":             result.urgency,
+        "urgency_score":       result.urgency_score,
+        # ── Business impact ─────────────────────────────────────────────────
         "business_impact_score": result.business_impact_score,
-        "sarcasm_probability": sarcasm,
-        "risk": risk,
-        "strategic_insight": insight,
-        "attributes": result.attributes,
-        "attribute_scores": result.attribute_scores,
-        "explanation": result.explanation,
-        "model_version": result.model_version,
-        "latency_ms": result.latency_ms,
+        # ── Risk tier ───────────────────────────────────────────────────────
+        "risk":                risk,
+        # ── Visualization metadata ──────────────────────────────────────────
+        "visualization":       result.visualization or {},
+        # ── Attributes ──────────────────────────────────────────────────────
+        "attributes":          result.attributes,
+        "attribute_scores":    result.attribute_scores,
+        # ── Insight & explainability ─────────────────────────────────────────
+        "strategic_insight":   insight,
+        "explanation":         result.explanation,
+        # ── Provenance ──────────────────────────────────────────────────────
+        "model_version":       result.model_version,
+        "latency_ms":          result.latency_ms,
     }
 
 
@@ -296,15 +294,22 @@ async def predict_csv(request: Request, file: UploadFile = File(...)):
     formatted = [_format_result(r, t, i) for i, (r, t) in enumerate(zip(results, texts))]
     total = len(formatted)
 
+    pos_count = sum(1 for r in results if r.sentiment == "positive")
+    neg_count = sum(1 for r in results if r.sentiment == "negative")
+    neu_count = sum(1 for r in results if r.sentiment == "neutral")
+
     return {
         "filename": file.filename,
         "total": total,
         "predictions": formatted,
         "summary": {
-            "positive": sum(1 for r in results if r.sentiment == "positive"),
-            "neutral": sum(1 for r in results if r.sentiment == "neutral"),
-            "negative": sum(1 for r in results if r.sentiment == "negative"),
+            "positive": pos_count,
+            "neutral": neu_count,
+            "negative": neg_count,
+            "positive_rate": round(pos_count / total, 4) if total else 0,
+            "negative_rate": round(neg_count / total, 4) if total else 0,
             "avg_confidence": round(sum(r.confidence for r in results) / total, 4) if total else 0,
+            "avg_business_impact": round(sum(r.business_impact_score for r in results) / total, 4) if total else 0,
             "critical_count": sum(1 for r in results if r.urgency == "critical"),
         },
     }

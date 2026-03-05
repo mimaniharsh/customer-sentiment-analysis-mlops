@@ -76,23 +76,80 @@ function MetricPill({ label, value, sub = null }: { label: string; value: string
   );
 }
 
-function SarcasmMeter({ value }: { value: number }) {
+function SarcasmMeter({ value, label, signals, explanation }: { value: number; label?: string; signals?: string[]; explanation?: string }) {
   const pct = Math.round(value * 100);
-  const color    = value >= 0.6 ? "text-violet-400" : value >= 0.35 ? "text-amber-400" : "text-slate-500";
-  const barColor = value >= 0.6 ? "bg-violet-500"   : value >= 0.35 ? "bg-amber-400"   : "bg-slate-600";
-  const label    = value >= 0.6 ? "Likely sarcastic" : value >= 0.35 ? "Possible irony" : "Literal tone";
+  const color    = value >= 0.55 ? "text-violet-400" : value >= 0.30 ? "text-amber-400" : "text-slate-500";
+  const barColor = value >= 0.55 ? "bg-violet-500"   : value >= 0.30 ? "bg-amber-400"   : "bg-slate-600";
+  const displayLabel = label || (value >= 0.55 ? "Likely sarcastic" : value >= 0.30 ? "Possible irony" : "Literal tone");
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5">
           <Brain className="w-3.5 h-3.5 text-slate-500" />
-          <span className="text-xs text-slate-500">Sarcasm Indicator</span>
-          <span className="text-xs text-slate-700">(signal mismatch)</span>
+          <span className="text-xs text-slate-400 font-medium">Sarcasm Detection</span>
         </div>
-        <span className={`text-sm font-bold tabular-nums ${color}`}>{pct}%</span>
+        <div className="flex items-center gap-2">
+          <span className={`text-xs px-2 py-0.5 rounded-full border font-semibold ${
+            value >= 0.55 ? "bg-violet-500/15 text-violet-300 border-violet-500/30" :
+            value >= 0.30 ? "bg-amber-500/15 text-amber-300 border-amber-500/30" :
+            "bg-slate-700/30 text-slate-500 border-slate-600/20"
+          }`}>{displayLabel}</span>
+          <span className={`text-sm font-bold tabular-nums ${color}`}>{pct}%</span>
+        </div>
       </div>
       <GaugeBar value={value} color={barColor} />
-      <p className={`text-xs ${color}`}>{label}</p>
+      {signals && signals.length > 0 && (
+        <div className="space-y-1 mt-1">
+          {signals.slice(0, 3).map((s, i) => (
+            <p key={i} className="text-xs text-slate-600 flex items-start gap-1.5">
+              <span className="text-violet-600 mt-0.5 shrink-0">›</span>{s}
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SeverityPanel({ severity_tier, severity_label, severity_score, severity_criteria, severity_keywords, severity_explanation }: {
+  severity_tier: string; severity_label: string; severity_score: number;
+  severity_criteria: string[]; severity_keywords: string[]; severity_explanation: string;
+}) {
+  const TIER_STYLE: Record<string, string> = {
+    critical: "text-red-300 bg-red-950/50 border-red-500/30",
+    high:     "text-orange-300 bg-orange-950/50 border-orange-500/30",
+    medium:   "text-amber-300 bg-amber-950/50 border-amber-500/30",
+    low:      "text-emerald-400 bg-emerald-950/40 border-emerald-500/20",
+  };
+  const style = TIER_STYLE[severity_tier] || TIER_STYLE.low;
+  return (
+    <div className={`border rounded-lg p-3.5 space-y-2.5 ${style}`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <ShieldAlert className="w-3.5 h-3.5" />
+          <span className="text-xs font-bold uppercase tracking-wider">Severity: {severity_label}</span>
+        </div>
+        <span className="text-sm font-bold tabular-nums">{severity_score.toFixed(2)}<span className="text-xs font-normal opacity-60">/1.00</span></span>
+      </div>
+      {severity_keywords.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {severity_keywords.map(kw => (
+            <span key={kw} className="text-xs px-1.5 py-0.5 bg-black/20 rounded font-mono">{kw}</span>
+          ))}
+        </div>
+      )}
+      {severity_criteria.length > 0 && (
+        <div className="space-y-1">
+          {severity_criteria.map((c, i) => (
+            <p key={i} className="text-xs opacity-80 flex items-start gap-1.5">
+              <span className="mt-0.5 shrink-0">›</span>{c}
+            </p>
+          ))}
+        </div>
+      )}
+      {severity_explanation && (
+        <p className="text-xs opacity-70 border-t border-white/10 pt-2">{severity_explanation}</p>
+      )}
     </div>
   );
 }
@@ -114,6 +171,7 @@ function IntelligenceCard({ r, index, isLatest = false }: { r: any; index: numbe
   const Icon = cfg.Icon;
   const tokens = r.explanation?.top_tokens || [];
   const riskCfg = RISK_CONFIG[r.risk?.tier] || RISK_CONFIG.LOW;
+  const wasOverridden = r.sentiment_override_reason && r.sentiment_override_reason.startsWith("Overridden");
 
   return (
     <div className={`border rounded-xl overflow-hidden transition-all duration-300 ${cfg.border} ${isLatest ? "ring-1 ring-indigo-500/30" : ""}`} style={{ background: "rgba(10,15,25,0.97)" }}>
@@ -122,6 +180,11 @@ function IntelligenceCard({ r, index, isLatest = false }: { r: any; index: numbe
         <div className="flex items-center gap-3">
           <Icon className={`w-4 h-4 shrink-0 ${cfg.textColor}`} />
           <span className={`text-sm font-bold uppercase tracking-wide ${cfg.textColor}`}>{cfg.label}</span>
+          {wasOverridden && (
+            <span className="flex items-center gap-1 px-2 py-0.5 bg-violet-500/20 text-violet-300 border border-violet-500/30 rounded-full text-xs">
+              <Brain className="w-2.5 h-2.5" />sarcasm override
+            </span>
+          )}
           {isLatest && (
             <span className="flex items-center gap-1 px-2 py-0.5 bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 rounded-full text-xs">
               <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />Live
@@ -148,6 +211,7 @@ function IntelligenceCard({ r, index, isLatest = false }: { r: any; index: numbe
         <MetricPill label="Severity"        value={r.severity_score?.toFixed(2)} sub="/1.00" />
         <MetricPill label="Business Impact" value={r.business_impact_score?.toFixed(2)} sub="/1.00" />
         <MetricPill label="Urgency Score"   value={r.urgency_score?.toFixed(2)} sub="/1.00" />
+        <MetricPill label="Sarcasm"         value={`${Math.round((r.sarcasm_probability || 0) * 100)}%`} />
         {r.attributes?.length > 0 && (
           <div className="flex items-center gap-1.5 flex-wrap">
             {r.attributes.slice(0, 4).map((a: any) => (
@@ -176,9 +240,40 @@ function IntelligenceCard({ r, index, isLatest = false }: { r: any; index: numbe
 
       {expanded && (
         <div className="px-4 pb-4 space-y-4 border-t border-slate-800/40">
+
+          {/* Sarcasm detection */}
           <div className="pt-4">
-            {r.sarcasm_probability !== undefined && <SarcasmMeter value={r.sarcasm_probability} />}
+            <SarcasmMeter
+              value={r.sarcasm_probability || 0}
+              label={r.sarcasm_label}
+              signals={r.sarcasm_signals}
+              explanation={r.sarcasm_explanation}
+            />
           </div>
+
+          {/* Severity panel */}
+          {r.severity_tier && (
+            <SeverityPanel
+              severity_tier={r.severity_tier}
+              severity_label={r.severity_label || r.severity_tier}
+              severity_score={r.severity_score || 0}
+              severity_criteria={r.severity_criteria || []}
+              severity_keywords={r.severity_keywords || []}
+              severity_explanation={r.severity_explanation || ""}
+            />
+          )}
+
+          {/* Override reason */}
+          {wasOverridden && (
+            <div className="bg-violet-950/30 border border-violet-500/20 rounded-lg p-3">
+              <p className="text-xs text-violet-300 flex items-start gap-1.5">
+                <Brain className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span><strong>Classification override:</strong> {r.sentiment_override_reason}</span>
+              </p>
+            </div>
+          )}
+
+          {/* Strategic insight */}
           {r.strategic_insight && (
             <div className="bg-indigo-950/40 border border-indigo-500/20 rounded-lg p-3.5">
               <div className="flex items-center gap-2 mb-2">
@@ -188,6 +283,8 @@ function IntelligenceCard({ r, index, isLatest = false }: { r: any; index: numbe
               <p className="text-sm text-slate-300 leading-relaxed">{r.strategic_insight}</p>
             </div>
           )}
+
+          {/* Recommended action */}
           {r.risk?.action && (
             <div className={`border rounded-lg p-3.5 ${riskCfg.bg} ${riskCfg.border}`}>
               <div className="flex items-center gap-2 mb-1.5">
@@ -197,6 +294,8 @@ function IntelligenceCard({ r, index, isLatest = false }: { r: any; index: numbe
               <p className="text-sm text-slate-300">{r.risk.action}</p>
             </div>
           )}
+
+          {/* Key tokens */}
           {tokens.length > 0 && (
             <div>
               <p className="text-xs text-slate-700 mb-2 uppercase tracking-wider">Key Tokens</p>

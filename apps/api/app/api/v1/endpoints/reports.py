@@ -276,7 +276,9 @@ async def list_reports():
             "type": meta["type"],
             "status": "ready",
             "created_at": meta["created_at"],
+            "created_at_display": meta.get("created_at_display", meta["created_at"]),
             "record_count": meta["record_count"],
+            "data": meta["data"],          # ← was missing: ReportViewer reads report.data
         }
         for rid, meta in sorted(
             _report_registry.items(),

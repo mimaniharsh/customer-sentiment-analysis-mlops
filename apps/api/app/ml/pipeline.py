@@ -71,6 +71,12 @@ class PipelineResult:
     # Explainability
     explanation: dict[str, Any] = field(default_factory=dict)
 
+    # Multi-head outputs
+    sarcasm: dict[str, Any] = field(default_factory=dict)       # sarcasm head output
+    severity: dict[str, Any] = field(default_factory=dict)      # severity head output
+    sentiment_override_reason: str = ""                          # why label was/wasn't overridden
+    visualization: dict[str, Any] = field(default_factory=dict) # viz metadata
+
     # Model provenance
     model_version: str = "v1"
     endpoint_name: str = ""
@@ -81,8 +87,324 @@ class PipelineResult:
 
 
 # ---------------------------------------------------------------------------
-# Attribute taxonomy — maps keywords to business attributes
+# Severity Matrix
 # ---------------------------------------------------------------------------
+# Each severity level has a score range, label, and defining criteria.
+# Used by the severity head to justify its classification.
+SEVERITY_MATRIX = {
+    "critical": {
+        "score_range": (0.75, 1.0),
+        "label": "Critical",
+        "criteria": [
+            "Explicit threat to churn or cancel",
+            "Financial harm (fraud, double charge, unresolved refund)",
+            "Safety or data security concern",
+            "Public-facing complaint with viral potential",
+            "Repeated unresolved escalation",
+        ],
+        "keywords": {
+            "cancel", "cancelled", "cancellation", "refund", "fraud", "stolen",
+            "charge", "overcharge", "stranded", "disgraceful", "never again",
+            "lawsuit", "furious", "appalling", "disgusting", "unacceptable",
+            "lost luggage", "data breach", "stolen", "scam",
+        },
+    },
+    "high": {
+        "score_range": (0.50, 0.75),
+        "label": "High",
+        "criteria": [
+            "Significant service failure affecting core experience",
+            "Strong negative emotion without threat to churn",
+            "Operational failure (delay, crash, broken feature)",
+            "Sarcasm masking serious dissatisfaction",
+        ],
+        "keywords": {
+            "delay", "delayed", "broken", "crash", "crashed", "terrible", "awful",
+            "horrible", "ridiculous", "useless", "unresolved", "wrong", "error",
+            "failed", "failure", "disaster", "zero", "shocked", "stuck",
+        },
+    },
+    "medium": {
+        "score_range": (0.25, 0.50),
+        "label": "Medium",
+        "criteria": [
+            "Moderate dissatisfaction with specific aspect",
+            "Inconvenience without major impact",
+            "Constructive criticism with improvement request",
+        ],
+        "keywords": {
+            "slow", "wait", "late", "confusing", "difficult", "annoying",
+            "inconvenient", "disappointed", "mediocre", "average", "could be better",
+            "improve", "missing", "lacks",
+        },
+    },
+    "low": {
+        "score_range": (0.0, 0.25),
+        "label": "Low",
+        "criteria": [
+            "Neutral or positive feedback",
+            "Minor observation with no emotional escalation",
+            "Praise or compliment",
+        ],
+        "keywords": set(),  # absence of negative signals
+    },
+}
+
+# Sarcasm patterns: (trigger_phrase, required_context_signal)
+# A sarcasm hit requires BOTH the trigger phrase AND a supporting negative context signal.
+SARCASM_TRIGGERS = [
+    # Overly positive phrases that become sarcastic in negative context
+    ("brilliant",          {"delay", "lost", "broken", "stranded", "again", "still", "once again"}),
+    ("fantastic",          {"delay", "lost", "broken", "stranded", "again", "still", "nowhere"}),
+    ("great job",          {"lost", "broken", "delay", "again", "disaster", "failed", "charged"}),
+    ("well done",          {"lost", "broken", "delay", "again", "disaster", "wrong", "nowhere"}),
+    ("oh wow",             {"delay", "lost", "broken", "again", "still", "unbelievable"}),
+    ("oh great",           {"delay", "lost", "broken", "again", "still", "nothing", "another"}),
+    ("love how",           {"delay", "broken", "charged", "never", "again", "ignored", "useless"}),
+    ("love it when",       {"delay", "broken", "charged", "never", "again", "ignored"}),
+    ("love the way",       {"delay", "broken", "charged", "never", "again", "ignored"}),
+    ("truly",              {"delay", "lost", "disaster", "never", "awful", "disgusting", "appalling"}),
+    ("absolutely",         {"lost", "broken", "delay", "disaster", "never", "furious", "shocked"}),
+    ("thanks for nothing", set()),  # always sarcastic
+    ("what a surprise",    set()),  # always sarcastic
+    ("you've outdone",     set()),  # always sarcastic
+    ("what service",       {"terrible", "awful", "broken", "lost", "delay", "stranded"}),
+    ("clearly",            {"nobody", "nothing", "no one", "useless", "wrong", "missing"}),
+    ("obviously",          {"nobody", "nothing", "no one", "useless", "wrong", "missing"}),
+]
+
+# Negation words that can flip apparent sentiment
+NEGATION_WORDS = {
+    "not", "no", "never", "barely", "hardly", "nothing", "nowhere",
+    "neither", "nor", "without", "lack", "lacking", "zero", "none",
+}
+
+
+def _sarcasm_head(text: str, sentiment: str, probs: dict) -> dict:
+    """
+    Sarcasm Head — multi-signal detection.
+
+    Signals checked (in order of weight):
+    1. Trigger phrase + supporting negative context (strongest)
+    2. Sentiment-urgency mismatch: model says positive but prob_negative is non-trivial
+    3. Negation flip: negative words immediately before positive descriptors
+    4. Exclamation amplifiers on complaint topics
+
+    Returns a dict with probability, detected signals, and explanation.
+    """
+    lower = text.lower()
+    words = set(lower.replace(",", " ").replace(".", " ").replace("!", " ").split())
+    signals: list[str] = []
+    score = 0.0
+
+    # Signal 1: Trigger phrase + context (weight: 0.35 per hit, max 0.70)
+    for trigger, context_set in SARCASM_TRIGGERS:
+        if trigger in lower:
+            if not context_set:
+                # Always sarcastic phrase
+                score += 0.45
+                signals.append(f"Always-sarcastic phrase detected: '{trigger}'")
+            elif context_set & words:
+                matched_ctx = context_set & words
+                score += 0.35
+                signals.append(f"Sarcasm trigger '{trigger}' with negative context: {matched_ctx}")
+
+    # Signal 2: Model sentiment vs prob mismatch (weight: 0.30)
+    prob_neg = probs.get("negative", 0.0)
+    prob_pos = probs.get("positive", 0.0)
+    if sentiment in ("positive", "neutral") and prob_neg > 0.20:
+        mismatch_strength = prob_neg * 0.50
+        score += mismatch_strength
+        signals.append(
+            f"Model-sentiment mismatch: labelled {sentiment} but prob_negative={prob_neg:.2f}"
+        )
+
+    # Signal 3: Negation flip (weight: 0.20)
+    # e.g. "not great", "barely acceptable", "nothing impressive"
+    text_words = lower.split()
+    for i, word in enumerate(text_words[:-1]):
+        if word in NEGATION_WORDS:
+            next_word = text_words[i + 1].strip(".,!?")
+            if next_word in {"great", "good", "fine", "happy", "satisfied", "okay", "ok",
+                             "amazing", "wonderful", "excellent", "perfect", "impressed"}:
+                score += 0.20
+                signals.append(f"Negation flip: '{word} {next_word}' inverts positive tone")
+                break
+
+    # Signal 4: Exclamation amplifiers on known complaint topic keywords (weight: 0.15)
+    complaint_keywords = {"delay", "lost", "broken", "charged", "stranded", "waiting", "cancelled"}
+    if "!" in text and complaint_keywords & words:
+        matched = complaint_keywords & words
+        score += 0.15
+        signals.append(f"Exclamation amplifier on complaint topic: {matched}")
+
+    score = round(min(score, 0.95), 3)
+    label = "Likely sarcastic" if score >= 0.55 else "Possible irony" if score >= 0.30 else "Literal tone"
+
+    return {
+        "probability": score,
+        "label": label,
+        "signals": signals,
+        "explanation": (
+            f"Sarcasm score {score:.0%} based on {len(signals)} signal(s). "
+            + (signals[0] if signals else "No sarcasm signals detected.")
+        ),
+    }
+
+
+def _severity_head(
+    text: str,
+    sentiment: str,
+    probs: dict,
+    urgency: str,
+    sarcasm: dict,
+) -> dict:
+    """
+    Severity Head — matrix-based scoring with justification.
+
+    Combines:
+    - Keyword match against severity matrix tiers (bottom-up scan)
+    - Model's prob_negative as baseline weight
+    - Urgency score as amplifier
+    - Sarcasm adjustment: sarcastic positive signals get severity boost
+
+    Returns tier label, numeric score [0,1], matched criteria, and explanation.
+    """
+    lower = text.lower()
+    words = set(lower.replace(",", " ").replace(".", " ").replace("!", " ").split())
+
+    # Determine raw tier from keyword matches (highest tier wins)
+    matched_tier = "low"
+    matched_keywords: list[str] = []
+    matched_criteria: list[str] = []
+
+    for tier in ["critical", "high", "medium"]:
+        tier_kw = SEVERITY_MATRIX[tier]["keywords"]
+        hits = tier_kw & words
+        # Also check multi-word phrases
+        phrase_hits = {kw for kw in tier_kw if " " in kw and kw in lower}
+        all_hits = hits | phrase_hits
+        if all_hits:
+            matched_tier = tier
+            matched_keywords = list(all_hits)[:4]
+            matched_criteria = SEVERITY_MATRIX[tier]["criteria"][:2]
+            break
+
+    # Baseline score from prob_negative
+    base_score = probs.get("negative", 0.0) * 0.5
+
+    # Tier floor
+    tier_floors = {"critical": 0.72, "high": 0.48, "medium": 0.22, "low": 0.0}
+    score = max(base_score, tier_floors[matched_tier])
+
+    # Urgency amplifier
+    urgency_boost = {"critical": 0.20, "high": 0.12, "medium": 0.06, "low": 0.0}
+    score += urgency_boost.get(urgency, 0.0)
+
+    # Sarcasm adjustment: if sarcasm is high and sentiment appears positive, escalate severity
+    if sarcasm["probability"] >= 0.50 and sentiment in ("positive", "neutral"):
+        score += sarcasm["probability"] * 0.25
+        if matched_tier == "low":
+            matched_tier = "medium"
+            matched_criteria = ["Sarcasm masking serious dissatisfaction"]
+            matched_keywords = ["sarcasm-detected"]
+
+    score = round(min(score, 1.0), 4)
+
+    # Resolve final tier from score
+    final_tier = "low"
+    for tier, info in SEVERITY_MATRIX.items():
+        lo, hi = info["score_range"]
+        if lo <= score <= hi:
+            final_tier = tier
+            break
+
+    tier_info = SEVERITY_MATRIX[final_tier]
+
+    explanation_parts = []
+    if matched_keywords:
+        explanation_parts.append(f"Keywords matched: {', '.join(matched_keywords)}")
+    if sarcasm["probability"] >= 0.50:
+        explanation_parts.append(f"Sarcasm signal ({sarcasm['probability']:.0%}) elevated severity")
+    if urgency in ("critical", "high"):
+        explanation_parts.append(f"Urgency level '{urgency}' amplified score")
+    explanation_parts.append(f"prob_negative={probs.get('negative', 0):.2f} contributed baseline")
+
+    return {
+        "score": score,
+        "tier": final_tier,
+        "label": tier_info["label"],
+        "matched_keywords": matched_keywords,
+        "matched_criteria": matched_criteria or tier_info["criteria"][:1],
+        "explanation": ". ".join(explanation_parts) + ".",
+    }
+
+
+def _sentiment_head_override(
+    raw_sentiment: str,
+    probs: dict,
+    sarcasm: dict,
+    severity: dict,
+) -> tuple[str, str]:
+    """
+    Sentiment Head — applies sarcasm and severity overrides on top of the
+    raw SageMaker label. Returns (final_sentiment, override_reason).
+
+    Rules (applied in order):
+    1. If sarcasm >= 0.55 AND raw label is positive/neutral → override to negative
+    2. If severity tier is critical AND raw label is positive → override to negative
+    3. Otherwise keep the raw label
+    """
+    raw = raw_sentiment
+    reason = "Model label accepted as-is."
+
+    if sarcasm["probability"] >= 0.55 and raw in ("positive", "neutral"):
+        reason = (
+            f"Overridden from '{raw}' to 'negative': "
+            f"sarcasm probability {sarcasm['probability']:.0%} exceeds threshold. "
+            f"{sarcasm['signals'][0] if sarcasm['signals'] else ''}"
+        )
+        return "negative", reason
+
+    if severity["tier"] == "critical" and raw == "positive":
+        reason = (
+            f"Overridden from 'positive' to 'negative': "
+            f"severity matrix classified as CRITICAL ({severity['score']:.2f}). "
+            f"Keywords: {', '.join(severity['matched_keywords'][:2])}."
+        )
+        return "negative", reason
+
+    return raw, reason
+
+
+def _visualization_metadata(
+    final_sentiment: str,
+    probs: dict,
+    severity: dict,
+    sarcasm: dict,
+    attributes: list[str],
+    attribute_scores: dict,
+) -> dict:
+    """
+    Structured metadata for frontend visualizations.
+    Provides sentiment bucket, severity score, label distribution, and radar data.
+    """
+    return {
+        "sentiment_bucket": final_sentiment,
+        "severity_score": severity["score"],
+        "severity_tier": severity["tier"],
+        "sarcasm_score": sarcasm["probability"],
+        "label_distribution": {
+            "positive": round(probs.get("positive", 0.0), 4),
+            "neutral":  round(probs.get("neutral", 0.0), 4),
+            "negative": round(probs.get("negative", 0.0), 4),
+        },
+        "attribute_radar": [
+            {"attribute": a, "score": round(attribute_scores.get(a, 0.0), 3)}
+            for a in attributes
+        ],
+        "risk_signal": severity["tier"] in ("critical", "high") or sarcasm["probability"] >= 0.55,
+    }
 ATTRIBUTE_PATTERNS: dict[str, list[str]] = {
     "pricing": [
         "expensive", "cheap", "price", "cost", "fee", "overpriced",
@@ -181,16 +503,37 @@ class SentimentPipeline:
         # 8. Business impact
         business_impact = self._business_impact(severity_score, urgency_score, attributes)
 
-        # 9. Lightweight explainability (token attention proxy)
-        explanation = self._explain(text, sentiment, raw.get("attention_weights"))
+        # 9. Multi-head classification
+        probs_dict = {
+            "positive": probs.get("positive", 0.0),
+            "neutral":  probs.get("neutral", 0.0),
+            "negative": probs.get("negative", 0.0),
+        }
+        sarcasm_out  = _sarcasm_head(text, sentiment, probs_dict)
+        severity_out = _severity_head(text, sentiment, probs_dict, urgency, sarcasm_out)
+        final_sentiment, override_reason = _sentiment_head_override(
+            sentiment, probs_dict, sarcasm_out, severity_out
+        )
+        viz_meta = _visualization_metadata(
+            final_sentiment, probs_dict, severity_out, sarcasm_out, attributes, attribute_scores
+        )
 
-        # 10. Embedding fingerprint for cluster lookup
+        # Recalculate sentiment_score if label was overridden
+        if final_sentiment != sentiment:
+            sentiment_score = probs_dict["positive"] - probs_dict["negative"]
+            if final_sentiment == "negative":
+                sentiment_score = -abs(sentiment_score)
+
+        # 10. Lightweight explainability (token attention proxy)
+        explanation = self._explain(text, final_sentiment, raw.get("attention_weights"))
+
+        # 11. Embedding fingerprint for cluster lookup
         embedding_id = hashlib.sha256(text.encode()).hexdigest()[:36]
 
         latency_ms = int((time.perf_counter() - t0) * 1000)
 
         return PipelineResult(
-            sentiment=sentiment,
+            sentiment=final_sentiment,
             sentiment_score=round(sentiment_score, 4),
             confidence=round(confidence, 4),
             prob_positive=round(probs.get("positive", 0.0), 4),
@@ -198,11 +541,15 @@ class SentimentPipeline:
             prob_negative=round(probs.get("negative", 0.0), 4),
             urgency=urgency,
             urgency_score=round(urgency_score, 4),
-            severity_score=round(severity_score, 4),
+            severity_score=severity_out["score"],
             business_impact_score=round(business_impact, 4),
             attributes=attributes,
             attribute_scores=attribute_scores,
             explanation=explanation,
+            sarcasm=sarcasm_out,
+            severity=severity_out,
+            sentiment_override_reason=override_reason,
+            visualization=viz_meta,
             model_version=model_version,
             endpoint_name=self._endpoint,
             latency_ms=latency_ms,
@@ -236,11 +583,28 @@ class SentimentPipeline:
             urgency, urgency_score  = self._detect_urgency(text, sentiment, probs)
             severity_score          = self._compute_severity(sentiment, probs, urgency_score)
             business_impact         = self._business_impact(severity_score, urgency_score, attributes)
-            explanation             = self._explain(text, sentiment, raw.get("attention_weights"))
-            embedding_id            = hashlib.sha256(text.encode()).hexdigest()[:36]
+
+            probs_dict = {
+                "positive": probs.get("positive", 0.0),
+                "neutral":  probs.get("neutral", 0.0),
+                "negative": probs.get("negative", 0.0),
+            }
+            sarcasm_out  = _sarcasm_head(text, sentiment, probs_dict)
+            severity_out = _severity_head(text, sentiment, probs_dict, urgency, sarcasm_out)
+            final_sentiment, override_reason = _sentiment_head_override(
+                sentiment, probs_dict, sarcasm_out, severity_out
+            )
+            viz_meta    = _visualization_metadata(
+                final_sentiment, probs_dict, severity_out, sarcasm_out, attributes, attr_scores
+            )
+            if final_sentiment != sentiment:
+                sentiment_score = -abs(sentiment_score) if final_sentiment == "negative" else sentiment_score
+
+            explanation  = self._explain(text, final_sentiment, raw.get("attention_weights"))
+            embedding_id = hashlib.sha256(text.encode()).hexdigest()[:36]
 
             results.append(PipelineResult(
-                sentiment=sentiment,
+                sentiment=final_sentiment,
                 sentiment_score=round(sentiment_score, 4),
                 confidence=round(confidence, 4),
                 prob_positive=round(probs.get("positive", 0.0), 4),
@@ -248,11 +612,15 @@ class SentimentPipeline:
                 prob_negative=round(probs.get("negative", 0.0), 4),
                 urgency=urgency,
                 urgency_score=round(urgency_score, 4),
-                severity_score=round(severity_score, 4),
+                severity_score=severity_out["score"],
                 business_impact_score=round(business_impact, 4),
                 attributes=attributes,
                 attribute_scores=attr_scores,
                 explanation=explanation,
+                sarcasm=sarcasm_out,
+                severity=severity_out,
+                sentiment_override_reason=override_reason,
+                visualization=viz_meta,
                 model_version=model_version,
                 endpoint_name=self._endpoint,
                 latency_ms=int((time.perf_counter() - t0) * 1000),

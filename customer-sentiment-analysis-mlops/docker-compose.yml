@@ -1,0 +1,152 @@
+version: "3.9"
+
+# ============================================================
+# Sentient Intelligence Platform — Local Development Stack
+#
+# Usage:
+#   1. cp .env.example .env  →  fill in your values
+#   2. docker compose up --build
+#
+# AWS credentials are injected from the HOST environment only.
+# They are NEVER written into this file or any image layer.
+# ============================================================
+
+services:
+
+  # ─── PostgreSQL ──────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: sentient-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sentient
+      POSTGRES_PASSWORD: sentient_dev
+      POSTGRES_DB: sentient_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sentient"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Redis ───────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: sentient-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ─── FastAPI backend ─────────────────────────────────────────────────────
+  api:
+    build:
+      context: apps/api
+      dockerfile: Dockerfile
+    container_name: sentient-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file: .env                      # loads from your local .env
+    environment:
+      # Explicit mappings so the container names work for inter-service calls
+      DATABASE_URL: postgresql+asyncpg://sentient:sentient_dev@postgres:5432/sentient_db
+      REDIS_URL: redis://redis:6379/0
+      REDIS_CELERY_URL: redis://redis:6379/1
+      APP_ENV: development
+      # AWS credentials come from the .env file (host env) — NOT hardcoded here
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ─── Celery worker ───────────────────────────────────────────────────────
+  worker:
+    build:
+      context: apps/api
+      dockerfile: Dockerfile
+    container_name: sentient-worker
+    restart: unless-stopped
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=4
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://sentient:sentient_dev@postgres:5432/sentient_db
+      REDIS_URL: redis://redis:6379/0
+      REDIS_CELERY_URL: redis://redis:6379/1
+      APP_ENV: development
+    depends_on:
+      - api
+      - redis
+
+  # ─── Celery Beat (scheduler) ─────────────────────────────────────────────
+  beat:
+    build:
+      context: apps/api
+      dockerfile: Dockerfile
+    container_name: sentient-beat
+    restart: unless-stopped
+    command: celery -A app.workers.celery_app beat --loglevel=info
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://sentient:sentient_dev@postgres:5432/sentient_db
+      REDIS_URL: redis://redis:6379/0
+      REDIS_CELERY_URL: redis://redis:6379/1
+      APP_ENV: development
+    depends_on:
+      - redis
+      - worker
+
+  # ─── Next.js frontend ────────────────────────────────────────────────────
+  web:
+    build:
+      context: apps/web
+      dockerfile: Dockerfile
+    container_name: sentient-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_APP_NAME: "Sentient Intelligence Platform"
+    depends_on:
+      - api
+
+  # ─── Prometheus (optional observability) ─────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: sentient-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=15d"
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+
+networks:
+  default:
+    name: sentient-network
