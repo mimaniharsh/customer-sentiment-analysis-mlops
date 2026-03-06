@@ -30,21 +30,24 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
 
       - name: Login to Amazon ECR
-        run: |
-          aws ecr get-login-password --region ${{ vars.AWS_REGION }} | \
-          docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build and push API image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
-          docker build -t ${{ secrets.ECR_REGISTRY }}/sentient-api:${{ github.sha }} apps/api/
-          docker push ${{ secrets.ECR_REGISTRY }}/sentient-api:${{ github.sha }}
+          docker build -t $ECR_REGISTRY/sentient-api:${{ github.sha }} apps/api/
+          docker push $ECR_REGISTRY/sentient-api:${{ github.sha }}
 
       - name: Build and push Web image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
           docker build \
             --build-arg NEXT_PUBLIC_API_URL=${{ secrets.API_PUBLIC_URL }} \
-            -t ${{ secrets.ECR_REGISTRY }}/sentient-web:${{ github.sha }} apps/web/
-          docker push ${{ secrets.ECR_REGISTRY }}/sentient-web:${{ github.sha }}
+            -t $ECR_REGISTRY/sentient-web:${{ github.sha }} apps/web/
+          docker push $ECR_REGISTRY/sentient-web:${{ github.sha }}
 
       - name: Deploy to ECS
         run: |
