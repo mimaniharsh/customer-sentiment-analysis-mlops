@@ -191,6 +191,8 @@ def _format_result(result, text: str, idx: int = 0) -> dict:
         # ── Attributes ──────────────────────────────────────────────────────
         "attributes":          result.attributes,
         "attribute_scores":    result.attribute_scores,
+        # ── Multi-level decomposition ────────────────────────────────────────
+        "theme_breakdown":     result.theme_breakdown or [],
         # ── Insight & explainability ─────────────────────────────────────────
         "strategic_insight":   insight,
         "explanation":         result.explanation,

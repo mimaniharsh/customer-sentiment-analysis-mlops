@@ -77,6 +77,9 @@ class PipelineResult:
     sentiment_override_reason: str = ""                          # why label was/wasn't overridden
     visualization: dict[str, Any] = field(default_factory=dict) # viz metadata
 
+    # Multi-level decomposition
+    theme_breakdown: list[dict] = field(default_factory=list)
+
     # Model provenance
     model_version: str = "v1"
     endpoint_name: str = ""
@@ -405,6 +408,169 @@ def _visualization_metadata(
         ],
         "risk_signal": severity["tier"] in ("critical", "high") or sarcasm["probability"] >= 0.55,
     }
+# ---------------------------------------------------------------------------
+# Issue Taxonomy  (attribute → {issue_label: [trigger_keywords]})
+# ---------------------------------------------------------------------------
+# Each attribute maps to named root-cause issues with trigger word lists.
+# _decompose_tweet() uses this to attach a specific issue to every theme
+# component it extracts from a tweet.
+ISSUE_TAXONOMY: dict[str, dict[str, list[str]]] = {
+    "reliability": {
+        "Flight delay":       ["delay", "delayed", "late", "behind schedule", "waiting hours", "hours late"],
+        "Cancellation":       ["cancel", "cancelled", "cancellation", "grounded", "no flight"],
+        "Lost / damaged baggage": ["lost", "missing", "luggage", "bag", "baggage", "suitcase"],
+        "App / tech failure": ["crash", "crashed", "error", "bug", "broken", "failed", "glitch", "outage", "down"],
+        "Repeated failure":   ["again", "second time", "third time", "still", "once again", "keeps"],
+    },
+    "support": {
+        "Unresponsive team":      ["no response", "ignored", "hung up", "nobody", "no one responds"],
+        "Rude or unhelpful staff":["rude", "unhelpful", "unfriendly", "dismissive", "aggressive"],
+        "Long hold / wait times": ["on hold", "hold", "queue", "45 min", "waited hours", "hours waiting"],
+        "Unresolved complaint":   ["unresolved", "no resolution", "nothing done", "still waiting", "weeks"],
+        "Excellent staff":        ["helpful", "friendly", "great crew", "incredible staff", "amazing team"],
+    },
+    "pricing": {
+        "Overcharge / billing error": ["overcharged", "double charged", "charged twice", "billing error", "overcharge"],
+        "Refund not received":        ["refund", "no refund", "waiting for refund", "promised refund", "money back"],
+        "Hidden or surprise fees":    ["fee", "fees", "unexpected charge", "baggage fee", "surprise charge"],
+        "Poor value for money":       ["expensive", "overpriced", "not worth", "waste of money", "rip off"],
+    },
+    "performance": {
+        "In-flight entertainment":["entertainment", "screen", "broken screen", "tv", "no entertainment"],
+        "WiFi / connectivity":    ["wifi", "wi-fi", "internet", "connection dropped", "no wifi"],
+        "Food quality":           ["meal", "food", "cold food", "bad meal", "vegan", "lunch", "dinner", "snack"],
+        "Seat comfort":           ["seat", "legroom", "recline", "uncomfortable", "no legroom"],
+        "Loading speed":          ["slow loading", "lag", "speed", "responsive", "quick"],
+    },
+    "onboarding": {
+        "Confusing process":    ["confusing", "difficult", "unclear", "hard to", "not intuitive"],
+        "App setup issues":     ["setup", "install", "onboard", "account setup", "sign up"],
+        "Poor documentation":   ["no guide", "no help", "no tutorial", "documentation"],
+        "Smooth onboarding":    ["easy", "seamless", "smooth", "intuitive", "simple setup"],
+    },
+    "features": {
+        "Missing capability":  ["missing", "lacks", "no option", "wish it had", "should have"],
+        "Feature request":     ["request", "would be great", "please add", "suggest", "add feature"],
+        "Positive feature":    ["love the", "great feature", "finally", "works well", "brilliant feature"],
+    },
+    "security": {
+        "Data breach / hack":    ["breach", "hack", "hacked", "stolen data", "data leaked"],
+        "Account compromise":    ["account", "password", "unauthorized", "locked out"],
+        "Privacy concern":       ["privacy", "gdpr", "personal data", "tracking", "data sharing"],
+    },
+}
+
+# Clause splitter pattern — splits on sentence boundaries and coordinating conjunctions
+import re as _re
+_CLAUSE_SPLIT = _re.compile(
+    r'[.!?]+\s*'
+    r'|(?:,\s*(?:and|but|however|although|though|yet|while|also|plus)?\s*)'
+    r'|(?:\s+(?:but|however|although|though|yet|while)\s+)',
+    flags=_re.IGNORECASE,
+)
+
+_NEG_CUES = {
+    "terrible", "awful", "broken", "cancel", "cancelled", "lost", "delayed", "delay",
+    "charged", "rude", "stranded", "disaster", "unresolved", "furious", "disgrace",
+    "unacceptable", "horrible", "shocking", "appalling", "worst", "useless", "failed",
+    "never", "ridiculous", "overcharged", "refund", "crashed", "waited", "ignored",
+}
+_POS_CUES = {
+    "great", "excellent", "amazing", "smooth", "friendly", "love", "best", "incredible",
+    "perfect", "outstanding", "helpful", "impressed", "fantastic", "wonderful", "superb",
+    "brilliant", "delightful", "seamless", "easy", "quick", "fast", "happy", "satisfied",
+}
+
+
+def _decompose_tweet(text: str, attributes: list[str]) -> list[dict]:
+    """
+    Multi-level tweet decomposition.
+
+    Splits the tweet into clauses, assigns each clause to an attribute
+    category and a specific root-cause issue, and infers a per-clause
+    mini-sentiment.
+
+    Returns a list of component dicts:
+      { clause, attribute, issue, sentiment }
+
+    Each dict represents one independent theme in the original tweet.
+    A single tweet can produce multiple components with different attributes.
+    """
+    # 1. Split into clauses
+    raw_clauses = [c.strip() for c in _CLAUSE_SPLIT.split(text) if c and len(c.strip()) > 4]
+    if not raw_clauses:
+        raw_clauses = [text]
+
+    components: list[dict] = []
+
+    for clause in raw_clauses:
+        lower = clause.lower()
+        clause_words = set(lower.replace(",", " ").replace(".", " ").replace("!", " ").split())
+
+        # 2. Find best-matching attribute for this clause
+        best_attr: str | None = None
+        best_hits = 0
+        for attr, keywords in ATTRIBUTE_PATTERNS.items():
+            hits = sum(1 for kw in keywords if kw in lower)
+            if hits > best_hits:
+                best_hits = hits
+                best_attr = attr
+
+        if best_attr is None:
+            continue
+
+        # 3. Find specific root-cause issue within that attribute
+        best_issue = "General feedback"
+        best_issue_score = 0
+        if best_attr in ISSUE_TAXONOMY:
+            for issue_name, issue_kws in ISSUE_TAXONOMY[best_attr].items():
+                score = sum(1 for kw in issue_kws if kw in lower)
+                if score > best_issue_score:
+                    best_issue_score = score
+                    best_issue = issue_name
+
+        # 4. Per-clause mini-sentiment
+        pos_hits = len(_POS_CUES & clause_words)
+        neg_hits = len(_NEG_CUES & clause_words)
+        if neg_hits > pos_hits:
+            clause_sentiment = "negative"
+        elif pos_hits > neg_hits:
+            clause_sentiment = "positive"
+        else:
+            clause_sentiment = "neutral"
+
+        components.append({
+            "clause": clause,
+            "attribute": best_attr,
+            "issue": best_issue,
+            "sentiment": clause_sentiment,
+        })
+
+    # 5. Deduplicate: keep one entry per attribute.
+    #    If the same attribute appears twice, keep the negative-sentiment entry
+    #    (higher signal value for operations teams).
+    seen: dict[str, dict] = {}
+    for comp in components:
+        attr = comp["attribute"]
+        if attr not in seen:
+            seen[attr] = comp
+        elif comp["sentiment"] == "negative" and seen[attr]["sentiment"] != "negative":
+            seen[attr] = comp
+
+    result = list(seen.values())
+
+    # Fallback: if nothing was decomposed, return a single generic entry
+    if not result:
+        return [{
+            "clause": text,
+            "attribute": attributes[0] if attributes else "general",
+            "issue": "General feedback",
+            "sentiment": "neutral",
+        }]
+
+    return result
+
+
 ATTRIBUTE_PATTERNS: dict[str, list[str]] = {
     "pricing": [
         "expensive", "cheap", "price", "cost", "fee", "overpriced",
@@ -524,7 +690,10 @@ class SentimentPipeline:
             if final_sentiment == "negative":
                 sentiment_score = -abs(sentiment_score)
 
-        # 10. Lightweight explainability (token attention proxy)
+        # 10. Multi-level tweet decomposition
+        theme_breakdown = _decompose_tweet(text, attributes)
+
+        # 11. Lightweight explainability (token attention proxy)
         explanation = self._explain(text, final_sentiment, raw.get("attention_weights"))
 
         # 11. Embedding fingerprint for cluster lookup
@@ -550,6 +719,7 @@ class SentimentPipeline:
             severity=severity_out,
             sentiment_override_reason=override_reason,
             visualization=viz_meta,
+            theme_breakdown=theme_breakdown,
             model_version=model_version,
             endpoint_name=self._endpoint,
             latency_ms=latency_ms,
@@ -602,6 +772,7 @@ class SentimentPipeline:
 
             explanation  = self._explain(text, final_sentiment, raw.get("attention_weights"))
             embedding_id = hashlib.sha256(text.encode()).hexdigest()[:36]
+            theme_bd     = _decompose_tweet(text, attributes)
 
             results.append(PipelineResult(
                 sentiment=final_sentiment,
@@ -621,6 +792,7 @@ class SentimentPipeline:
                 severity=severity_out,
                 sentiment_override_reason=override_reason,
                 visualization=viz_meta,
+                theme_breakdown=theme_bd,
                 model_version=model_version,
                 endpoint_name=self._endpoint,
                 latency_ms=int((time.perf_counter() - t0) * 1000),
