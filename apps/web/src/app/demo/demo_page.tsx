@@ -7,7 +7,7 @@ import {
   AlertTriangle, CheckCircle, Minus, FileText, X,
   Activity, Radio, MessageSquare, Layers,
   TrendingUp, TrendingDown, ChevronDown, ChevronUp,
-  Wifi, WifiOff, Brain, ShieldAlert, Eye, GitBranch,
+  Wifi, WifiOff, Brain, ShieldAlert, Eye, Network,
 } from "lucide-react";
 
 const API = "/api/v1";
@@ -190,7 +190,7 @@ function ThemeBreakdown({ themes }: { themes: Array<{ clause: string; attribute:
   return (
     <div>
       <div className="flex items-center gap-2 mb-2.5">
-        <GitBranch className="w-3.5 h-3.5 text-slate-600" />
+        <Network className="w-3.5 h-3.5 text-slate-600" />
         <p className="text-xs text-slate-500 uppercase tracking-wider">Multi-level breakdown</p>
         <span className="ml-auto text-xs text-slate-700">{themes.length} component{themes.length > 1 ? "s" : ""}</span>
       </div>
