@@ -262,15 +262,15 @@ export function BubbleChart() {
       </div>
 
       {/* Chart */}
-      <div style={{ width: "100%", height: 320 }}>
+      <div style={{ width: "100%", height: 320 }} className="cursor-pointer">
         <ResponsiveContainer width="100%" height="100%">
           <ScatterChart margin={{ top: 16, right: 24, bottom: 24, left: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
             <XAxis
               type="number"
               dataKey="x"
-              domain={[-0.5, bubbles.length - 0.5]}
-              tickCount={bubbles.length}
+              domain={bubbles.length > 0 ? [-0.5, bubbles.length - 0.5] : [0, 1]}
+              tickCount={Math.max(bubbles.length, 1)}
               tickFormatter={xTick}
               tick={{ fill: "#64748b", fontSize: 11 }}
               axisLine={{ stroke: "#1e293b" }}
@@ -310,7 +310,6 @@ export function BubbleChart() {
               onClick={(d: any) =>
                 setSelected(selected?.attribute === d.attribute ? null : (d as Bubble))
               }
-              style={{ cursor: "pointer" }}
             />
           </ScatterChart>
         </ResponsiveContainer>

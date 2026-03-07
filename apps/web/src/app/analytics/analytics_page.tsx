@@ -3,6 +3,7 @@ import { SentimentTrendChart } from "@/components/charts/SentimentTrendChart";
 import { AttributeHeatmap } from "@/components/charts/AttributeHeatmap";
 import { UrgencyBreakdown } from "@/components/charts/UrgencyBreakdown";
 import { BubbleChart } from "@/components/charts/BubbleChart";
+import { RootCausePinpointer } from "@/components/charts/RootCausePinpointer";
 
 export default function AnalyticsPage() {
   return (
@@ -13,6 +14,7 @@ export default function AnalyticsPage() {
       </div>
       <SentimentTrendChart />
       <BubbleChart />
+      <RootCausePinpointer />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <AttributeHeatmap />
         <UrgencyBreakdown />
