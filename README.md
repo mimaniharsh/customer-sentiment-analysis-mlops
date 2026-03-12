@@ -54,7 +54,7 @@ Raw Tweet
     │
     ▼
 ┌──────────────────────────────────────────────────────────────┐
-│  Model Layer  (configurable: TF-IDF · LSTM · DistilBERT)    │
+│  Model Layer  (configurable: TF-IDF · LSTM · DistilBERT)     │
 │  Output: Positive / Neutral / Negative + raw probabilities   │
 └────────────────────────┬─────────────────────────────────────┘
                          │
@@ -252,7 +252,7 @@ Temperature scaling T=1.3 → Calibrates raw probabilities. "82% confidence" mea
 ┌──────────────────────────────────────────────────────────────────────┐
 │                   Sentient Platform — AWS                            │
 │                                                                      │
-│  Next.js 15        FastAPI (async)      SageMaker Endpoint          │
+│  Next.js 15        FastAPI (async)      SageMaker Endpoint           │
 │  Dashboard  ───▶   Multi-tenant API ──▶  DistilBERT / LSTM          │
 │             ◀───   JWT + RBAC       ◀──  ~180ms inference           │
 │                          │                                           │
@@ -262,9 +262,9 @@ Temperature scaling T=1.3 → Calibrates raw probabilities. "82% confidence" mea
 │                 │  tenant ISO     │   drift · metrics · reports      │
 │                 └─────────────────┘                                  │
 │                                                                      │
-│  CI/CD     GitHub Actions → ECR → ECS  (OIDC — zero static keys)   │
-│  Secrets   AWS Secrets Manager (prod) · .env (dev)                  │
-│  Monitor   Prometheus · Sentry · structured JSON logs               │
+│  CI/CD     GitHub Actions → ECR → ECS  (OIDC — zero static keys)     │
+│  Secrets   AWS Secrets Manager (prod) · .env (dev)                   │
+│  Monitor   Prometheus · Sentry · structured JSON logs                │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
