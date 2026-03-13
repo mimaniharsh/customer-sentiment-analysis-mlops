@@ -21,9 +21,7 @@
 
 > **TAPMI MBA–AI&DS · Concurrent Running Project (CRP) · ADS 5711 · Term 3 · Batch 2025–2027**
 >
-> Submitted by **Harsh Mimani** (25A108) and **Gokul Raj E** (25A106)
 >
-> *Supervised by Prof. Winson Fernandes (MSIS) & Prof. Gaurav Sarin (TAPMI)*
 
 <br/>
 
@@ -98,34 +96,34 @@ SentiAI is architected as a multi-tenant SaaS platform spanning six containerise
 ┌────────────────────────────────────────────────────────────────────────────────┐
 │                           AWS Cloud — Production                               │
 │                                                                                │
-│   ┌───────────────────────┐    ┌──────────────────────────────────────────┐   │
-│   │  Next.js 15.0.3       │    │  FastAPI 0.115  ·  Uvicorn 0.30.6       │   │
-│   │  TypeScript 5         │◀──▶│  Python 3.11   ·  2 async workers       │   │
-│   │  Executive Dashboard  │    │  JWT (RS256)   ·  RBAC — 4 roles        │   │
-│   │  7 stakeholder views  │    │  SlowAPI rate limiting · GZip middleware │   │
-│   └───────────────────────┘    └─────────────────────┬────────────────────┘   │
-│                                                      │                        │
-│                                     ┌────────────────▼────────────────┐       │
-│                                     │   AWS SageMaker Endpoint        │       │
-│                                     │   DistilBERT (fine-tuned)       │       │
-│                                     │   Instance:  ml.m5.large (CPU)  │       │
-│                                     │   Latency:   ~180 ms            │       │
-│                                     │   Batch:     up to 500 texts    │       │
-│                                     └─────────────────────────────────┘       │
+│   ┌───────────────────────┐     ┌──────────────────────────────────────────┐   │
+│   │  Next.js 15.0.3       │     │  FastAPI 0.115  ·  Uvicorn 0.30.6        │   │
+│   │  TypeScript 5         │◀──▶│  Python 3.11   ·  2 async workers        │   │
+│   │  Executive Dashboard  │     │  JWT (RS256)   ·  RBAC — 4 roles         │   │
+│   │  7 stakeholder views  │     │  SlowAPI rate limiting · GZip middleware │   │
+│   └───────────────────────┘     └─────────────────────┬────────────────────┘   │
+│                                                       │                        │
+│                                     ┌─────────────────▼────────────────┐       │
+│                                     │   AWS SageMaker Endpoint         │       │
+│                                     │   DistilBERT (fine-tuned)        │       │
+│                                     │   Instance:  ml.m5.large (CPU)   │       │
+│                                     │   Latency:   ~180 ms             │       │
+│                                     │   Batch:     up to 500 texts     │       │
+│                                     └──────────────────────────────────┘       │
 │                                                                                │
-│   ┌──────────────────────────┐    ┌──────────────────────────────────────┐    │
-│   │  PostgreSQL 16 Alpine    │    │  Redis 7 Alpine  ·  Celery 5.4       │    │
-│   │  7 async ORM models      │    │  Worker: concurrency=4               │    │
-│   │  Row-level tenant ISO    │    │  Beat: hourly metrics                │    │
-│   │  Alembic migrations      │    │        drift detection at 02:00 UTC  │    │
-│   └──────────────────────────┘    └──────────────────────────────────────┘    │
+│   ┌──────────────────────────┐    ┌──────────────────────────────────────┐     │
+│   │  PostgreSQL 16 Alpine    │    │  Redis 7 Alpine  ·  Celery 5.4       │     │
+│   │  7 async ORM models      │    │  Worker: concurrency=4               │     │
+│   │  Row-level tenant ISO    │    │  Beat: hourly metrics                │     │
+│   │  Alembic migrations      │    │        drift detection at 02:00 UTC  │     │
+│   └──────────────────────────┘    └──────────────────────────────────────┘     │
 │                                                                                │
-│  S3           Model artifacts · processed data · evaluation outputs           │
-│  ECR          Docker images tagged by Git SHA — immutable deployments         │
-│  ECS Fargate  API + Web containers — rolling zero-downtime updates            │
-│  Secrets Mgr  All production credentials fetched at runtime via IAM role      │
-│  OIDC         GitHub Actions auth — zero long-lived access keys               │
-│  Prometheus   API latency · endpoint health · prediction class distribution   │
+│  S3           Model artifacts · processed data · evaluation outputs            │
+│  ECR          Docker images tagged by Git SHA — immutable deployments          │
+│  ECS Fargate  API + Web containers — rolling zero-downtime updates             │
+│  Secrets Mgr  All production credentials fetched at runtime via IAM role       │
+│  OIDC         GitHub Actions auth — zero long-lived access keys                │
+│  Prometheus   API latency · endpoint health · prediction class distribution    │
 │                                                                                │
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -167,9 +165,9 @@ Raw DistilBERT output — three class probabilities — is insufficient for oper
   │  Threshold 0.55 │  │ with auditable│  │  35-issue taxonomy   │
   │  Label override │  │ justification │  │  Root-cause clauses  │
   └────────┬────────┘  └───────┬───────┘  └──────────┬───────────┘
-           │                  │                       │
-           └──────────────────┼───────────────────────┘
-                              ▼
+           │                   │                     │
+           └───────────────────┼─────────────────────┘
+                               ▼
               ┌───────────────────────────────┐
               │   Override & Risk Engine      │
               │   Sarcasm ≥ 0.55 → flip label │
