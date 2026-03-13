@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://img.shields.io/badge/Sentient-Intelligence%20Platform-4f46e5?style=for-the-badge&logoColor=white" alt="Sentient" height="32"/>
+<img src="https://img.shields.io/badge/SentiAI-Intelligence%20Platform-4f46e5?style=for-the-badge&logoColor=white" alt="SentiAI" height="32"/>
 
 # Customer Sentiment Analysis & Brand Reputation Tracking
 
@@ -38,13 +38,13 @@ Airlines receive thousands of tweets every day. Standard keyword-based sentiment
 
 Every keyword system in the industry scores that tweet as **positive**. The customer is furious and about to churn.
 
-**Sentient** solves this. It evaluates three NLP architectures side-by-side on the same dataset, deploys the best-performing model to production, and runs every prediction through a four-layer enrichment engine that returns not just a sentiment label — but an **actionable intelligence card** complete with urgency level, severity tier, sarcasm probability, root-cause attribution, business impact score, and a specific escalation action.
+**SentiAI** solves this. It evaluates three NLP architectures side-by-side on the same dataset, deploys the best-performing model to production, and runs every prediction through a four-layer enrichment engine that returns not just a sentiment label — but an **actionable intelligence card** complete with urgency level, severity tier, sarcasm probability, root-cause attribution, business impact score, and a specific escalation action.
 
 ---
 
 ## What This Delivers
 
-| Without Sentient | With Sentient |
+| Without SentiAI | With SentiAI |
 |---|---|
 | Manual tweet triage: 3–5 min/tweet | Automated triage: < 200 ms/tweet |
 | Sarcasm misclassified as positive | 82%+ sarcasm detection with override & explanation |
@@ -296,7 +296,7 @@ curl -X POST http://localhost:8000/api/v1/predict/csv \
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│                     Sentient Platform — AWS                            │
+│                     SentiAI Platform — AWS                             │
 │                                                                        │
 │   ┌───────────────┐      ┌──────────────────────────┐                  │
 │   │  Next.js 15   │      │   FastAPI (async)        │                  │
