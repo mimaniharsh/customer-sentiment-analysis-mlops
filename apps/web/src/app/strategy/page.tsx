@@ -204,7 +204,7 @@ const QUADRANT_CFG = [
   { key: "quick_win",  label: "Quick Wins",       x: 0,   y: 0,   fill: "#10b981", desc: "High impact · Low effort" },
   { key: "strategic",  label: "Strategic Bets",   x: 50,  y: 0,   fill: "#6366f1", desc: "High impact · High effort" },
   { key: "fill_in",    label: "Fill-Ins",          x: 0,   y: 50,  fill: "#475569", desc: "Low impact · Low effort" },
-  { key: "avoid",      label: "Deprioritise",      x: 50,  y: 50,  fill: "#7f1d1d", desc: "Low impact · High effort" },
+  { key: "avoid",      label: "Defer & Reassess",      x: 50,  y: 50,  fill: "#7f1d1d", desc: "Low impact · High effort" },
 ];
 
 function PriorityMatrix({ points }: { points: MatrixPoint[] }) {
@@ -236,7 +236,7 @@ function PriorityMatrix({ points }: { points: MatrixPoint[] }) {
           <text x={PAD.l + 8} y={PAD.t + 16} fill="#10b981" fontSize={10} fontWeight={600}>Quick Wins ↗</text>
           <text x={PAD.l + plotW / 2 + 8} y={PAD.t + 16} fill="#818cf8" fontSize={10} fontWeight={600}>Strategic Bets</text>
           <text x={PAD.l + 8} y={PAD.t + plotH / 2 + 16} fill="#64748b" fontSize={10} fontWeight={600}>Fill-Ins</text>
-          <text x={PAD.l + plotW / 2 + 8} y={PAD.t + plotH / 2 + 16} fill="#ef4444" fontSize={10} fontWeight={600}>Deprioritise</text>
+          <text x={PAD.l + plotW / 2 + 8} y={PAD.t + plotH / 2 + 16} fill="#ef4444" fontSize={10} fontWeight={600}>Defer & Reassess</text>
 
           {/* Divider lines */}
           <line x1={PAD.l + plotW / 2} y1={PAD.t} x2={PAD.l + plotW / 2} y2={PAD.t + plotH} stroke="#334155" strokeDasharray="4 3" strokeWidth={1} />
@@ -292,7 +292,7 @@ function PriorityMatrix({ points }: { points: MatrixPoint[] }) {
                 hovered.quadrant === "strategic"  ? "text-indigo-400"  :
                 hovered.quadrant === "fill_in"    ? "text-slate-400"   : "text-red-400"
               }`}>
-                {hovered.quadrant === "quick_win" ? "Quick Win" : hovered.quadrant === "strategic" ? "Strategic Bet" : hovered.quadrant === "fill_in" ? "Fill-In" : "Deprioritise"}
+                {hovered.quadrant === "quick_win" ? "Quick Win" : hovered.quadrant === "strategic" ? "Strategic Bet" : hovered.quadrant === "fill_in" ? "Fill-In" : "Defer & Reassess"}
               </span>
             </div>
           </div>
